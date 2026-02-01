@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Navigation, Users, Clock, RefreshCw, X, Crosshair } from "lucide-react";
+import { MapPin, Navigation, Users, Clock, RefreshCw, X, Crosshair, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { fortressClient } from "@/lib/fortress-client";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -88,47 +88,69 @@ export function LocationMap({ conversationId, onClose, isOpen }: LocationMapProp
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [teamLocations, setTeamLocations] = useState<TeamLocation[]>([]);
   const [isSharing, setIsSharing] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<[number, number]>([40.7128, -74.006]);
   const [mapZoom, setMapZoom] = useState(13);
 
-  // Mock team locations for demo
-  useEffect(() => {
-    if (isOpen) {
-      // Simulate team member locations
-      const mockLocations: TeamLocation[] = [
-        {
-          id: "1",
-          user_id: "user-1",
-          name: "Alex Chen",
-          lat: 40.7148,
-          lng: -74.008,
-          updated_at: new Date(Date.now() - 5 * 60000).toISOString(),
-          status: "active",
-        },
-        {
-          id: "2",
-          user_id: "user-2",
-          name: "Jordan Rivera",
-          lat: 40.7108,
-          lng: -74.002,
-          updated_at: new Date(Date.now() - 15 * 60000).toISOString(),
-          status: "idle",
-        },
-        {
-          id: "3",
-          user_id: "user-3",
-          name: "Sam Taylor",
-          lat: 40.7168,
-          lng: -74.012,
-          updated_at: new Date(Date.now() - 60 * 60000).toISOString(),
-          status: "offline",
-        },
-      ];
-      setTeamLocations(mockLocations);
+  // Fetch real team locations from Fortress
+  const loadTeamLocations = useCallback(async () => {
+    if (!isOpen) return;
+    
+    setIsLoading(true);
+    try {
+      // Fetch locations from Fortress platform
+      const { data, error } = await fortressClient
+        .from("user_locations")
+        .select(`
+          id,
+          user_id,
+          latitude,
+          longitude,
+          updated_at,
+          profiles:user_id (
+            full_name,
+            avatar_url
+          )
+        `)
+        .order("updated_at", { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        const locations: TeamLocation[] = data.map((loc: any) => {
+          const updatedAt = new Date(loc.updated_at);
+          const minutesAgo = (Date.now() - updatedAt.getTime()) / 60000;
+          
+          return {
+            id: loc.id,
+            user_id: loc.user_id,
+            name: loc.profiles?.full_name || "Unknown",
+            avatar_url: loc.profiles?.avatar_url,
+            lat: loc.latitude,
+            lng: loc.longitude,
+            updated_at: loc.updated_at,
+            status: minutesAgo < 5 ? "active" : minutesAgo < 30 ? "idle" : "offline",
+          };
+        });
+        
+        setTeamLocations(locations);
+        
+        // Center on first location if available
+        if (locations.length > 0) {
+          setMapCenter([locations[0].lat, locations[0].lng]);
+        }
+      } else {
+        setTeamLocations([]);
+      }
+    } catch (err) {
+      console.error("Error loading team locations:", err);
+      setTeamLocations([]);
     }
+    setIsLoading(false);
   }, [isOpen]);
+
+  useEffect(() => {
+    loadTeamLocations();
+  }, [loadTeamLocations]);
 
   const getCurrentLocation = useCallback(() => {
     setIsLoading(true);
@@ -218,6 +240,14 @@ export function LocationMap({ conversationId, onClose, isOpen }: LocationMapProp
               <Button
                 variant="ghost"
                 size="icon"
+                onClick={loadTeamLocations}
+                disabled={isLoading}
+              >
+                <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={getCurrentLocation}
                 disabled={isLoading}
               >
@@ -229,62 +259,71 @@ export function LocationMap({ conversationId, onClose, isOpen }: LocationMapProp
 
         {/* Map Container */}
         <div className="absolute inset-0 pt-[60px] pb-[180px]">
-          <MapContainer
-            center={mapCenter}
-            zoom={mapZoom}
-            className="h-full w-full"
-            zoomControl={false}
-          >
-            <MapController center={mapCenter} zoom={mapZoom} />
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            />
-            
-            {/* Team member markers */}
-            {teamLocations.map((location) => (
-              <Marker
-                key={location.id}
-                position={[location.lat, location.lng]}
-                icon={createCustomIcon(getStatusColor(location.status))}
-                eventHandlers={{
-                  click: () => focusOnMember(location),
-                }}
-              >
-                <Popup className="custom-popup">
-                  <div className="flex items-center gap-2 p-1">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={location.avatar_url} />
-                      <AvatarFallback className="text-xs bg-secondary">
-                        {location.name.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-sm">{location.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {getTimeAgo(location.updated_at)}
-                      </p>
+          {isLoading && teamLocations.length === 0 ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">Loading locations...</p>
+              </div>
+            </div>
+          ) : (
+            <MapContainer
+              center={mapCenter}
+              zoom={mapZoom}
+              className="h-full w-full"
+              zoomControl={false}
+            >
+              <MapController center={mapCenter} zoom={mapZoom} />
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              />
+              
+              {/* Team member markers */}
+              {teamLocations.map((location) => (
+                <Marker
+                  key={location.id}
+                  position={[location.lat, location.lng]}
+                  icon={createCustomIcon(getStatusColor(location.status))}
+                  eventHandlers={{
+                    click: () => focusOnMember(location),
+                  }}
+                >
+                  <Popup className="custom-popup">
+                    <div className="flex items-center gap-2 p-1">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={location.avatar_url} />
+                        <AvatarFallback className="text-xs bg-secondary">
+                          {location.name.charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-sm">{location.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {getTimeAgo(location.updated_at)}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
+                  </Popup>
+                </Marker>
+              ))}
 
-            {/* User's own location */}
-            {userLocation && (
-              <Marker
-                position={[userLocation.lat, userLocation.lng]}
-                icon={createCustomIcon("hsl(var(--primary))", true)}
-              >
-                <Popup>
-                  <div className="p-1">
-                    <p className="font-medium text-sm">Your Location</p>
-                    <p className="text-xs text-muted-foreground">Sharing active</p>
-                  </div>
-                </Popup>
-              </Marker>
-            )}
-          </MapContainer>
+              {/* User's own location */}
+              {userLocation && (
+                <Marker
+                  position={[userLocation.lat, userLocation.lng]}
+                  icon={createCustomIcon("hsl(var(--primary))", true)}
+                >
+                  <Popup>
+                    <div className="p-1">
+                      <p className="font-medium text-sm">Your Location</p>
+                      <p className="text-xs text-muted-foreground">Sharing active</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+            </MapContainer>
+          )}
         </div>
 
         {/* Bottom Panel */}
@@ -316,46 +355,52 @@ export function LocationMap({ conversationId, onClose, isOpen }: LocationMapProp
             </div>
             
             <ScrollArea className="max-h-[100px]">
-              <div className="flex gap-2 pb-2">
-                {teamLocations.map((location) => (
-                  <motion.div
-                    key={location.id}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => focusOnMember(location)}
-                  >
-                    <Card
-                      className={cn(
-                        "p-3 cursor-pointer transition-all min-w-[140px]",
-                        selectedMember === location.id
-                          ? "border-primary bg-primary/10"
-                          : "hover:bg-card/80"
-                      )}
+              {teamLocations.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No team locations available
+                </p>
+              ) : (
+                <div className="flex gap-2 pb-2">
+                  {teamLocations.map((location) => (
+                    <motion.div
+                      key={location.id}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => focusOnMember(location)}
                     >
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={location.avatar_url} />
-                            <AvatarFallback className="text-xs bg-secondary">
-                              {location.name.charAt(0)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div
-                            className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
-                            style={{ backgroundColor: getStatusColor(location.status) }}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{location.name}</p>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {getTimeAgo(location.updated_at)}
+                      <Card
+                        className={cn(
+                          "p-3 cursor-pointer transition-all min-w-[140px]",
+                          selectedMember === location.id
+                            ? "border-primary bg-primary/10"
+                            : "hover:bg-card/80"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="relative">
+                            <Avatar className="h-8 w-8">
+                              <AvatarImage src={location.avatar_url} />
+                              <AvatarFallback className="text-xs bg-secondary">
+                                {location.name.charAt(0)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div
+                              className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card"
+                              style={{ backgroundColor: getStatusColor(location.status) }}
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{location.name}</p>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {getTimeAgo(location.updated_at)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </ScrollArea>
           </div>
         </div>
