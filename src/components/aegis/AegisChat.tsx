@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,11 +37,38 @@ export function AegisChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback(() => {
+    if (!scrollRef.current) return;
+    const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    const target = scrollContainer || scrollRef.current;
+    target.scrollTop = target.scrollHeight;
+  }, []);
+
+  // Scroll to bottom when messages finish loading or change
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (!isLoading && messages.length > 0) {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        setTimeout(scrollToBottom, 100);
+        setTimeout(scrollToBottom, 300);
+      });
     }
-  }, [messages, isStreaming]);
+  }, [messages, isLoading, scrollToBottom]);
+
+  // Scroll when streaming new content
+  useEffect(() => {
+    if (isStreaming) {
+      scrollToBottom();
+    }
+  }, [isStreaming, messages, scrollToBottom]);
+
+  // Scroll when switching conversations
+  useEffect(() => {
+    if (currentConversationId) {
+      setTimeout(scrollToBottom, 400);
+    }
+  }, [currentConversationId, scrollToBottom]);
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return;
