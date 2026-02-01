@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2, MapPin, MoreVertical } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin, MoreVertical, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { LocationMap } from "./LocationMap";
 import { AttachmentPicker, AttachmentPreviewBar, type Attachment } from "./AttachmentPicker";
 import { MessageAttachments, type MessageAttachment } from "./MessageAttachments";
+import { AegisAlert, AegisMonitoringBadge } from "./AegisAlert";
 
 interface Message {
   id: string;
@@ -23,6 +24,13 @@ interface Message {
     full_name: string;
     avatar_url: string | null;
   };
+}
+
+interface AegisAnalysis {
+  severity: "critical" | "high" | "medium" | "low" | "none";
+  shouldIntervene: boolean;
+  suggestion?: string;
+  emergencyType?: string | null;
 }
 
 interface ConversationViewProps {
@@ -40,6 +48,8 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [showLocationMap, setShowLocationMap] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [aegisAlert, setAegisAlert] = useState<AegisAnalysis | null>(null);
+  const [isAegisActive, setIsAegisActive] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -125,10 +135,51 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         attachments: msg.attachments || [],
       }));
       setMessages(messagesWithSender);
+      
+      // Trigger Aegis analysis on new messages
+      if (isAegisActive && messagesWithSender.length > 0) {
+        analyzeWithAegis(messagesWithSender);
+      }
     }
     
     setIsLoading(false);
   };
+
+  // Aegis AI monitoring
+  const analyzeWithAegis = useCallback(async (recentMessages: Message[]) => {
+    if (!isAegisActive || recentMessages.length === 0) return;
+
+    try {
+      const messagesToAnalyze = recentMessages.slice(-5).map(m => ({
+        role: m.sender_id === currentUserId ? "user" : "assistant",
+        content: m.content
+      }));
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-monitor`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ 
+            messages: messagesToAnalyze,
+            conversationId 
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const analysis: AegisAnalysis = await response.json();
+        if (analysis.shouldIntervene && analysis.suggestion) {
+          setAegisAlert(analysis);
+        }
+      }
+    } catch (error) {
+      console.error("Aegis analysis error:", error);
+    }
+  }, [isAegisActive, currentUserId, conversationId]);
 
   const uploadAttachments = async (): Promise<MessageAttachment[]> => {
     if (!currentUserId || attachments.length === 0) return [];
@@ -240,7 +291,10 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h2 className="font-semibold text-foreground">{conversationName}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-foreground">{conversationName}</h2>
+                <AegisMonitoringBadge isActive={isAegisActive} />
+              </div>
               <p className="text-xs text-muted-foreground">Direct message</p>
             </div>
           </div>
@@ -255,9 +309,32 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                 <MapPin className="h-4 w-4 mr-2" />
                 View Team Locations
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsAegisActive(!isAegisActive)}>
+                <Shield className="h-4 w-4 mr-2" />
+                {isAegisActive ? "Disable" : "Enable"} Aegis Monitoring
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Aegis Alert */}
+        <AnimatePresence>
+          {aegisAlert && aegisAlert.shouldIntervene && (
+            <AegisAlert
+              severity={aegisAlert.severity}
+              suggestion={aegisAlert.suggestion || ""}
+              emergencyType={aegisAlert.emergencyType}
+              onDismiss={() => setAegisAlert(null)}
+              onAcceptHelp={() => {
+                toast({
+                  title: "Aegis Assistance Activated",
+                  description: "Help is on the way. Stay calm and follow protocols.",
+                });
+                setAegisAlert(null);
+              }}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Messages */}
         <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
