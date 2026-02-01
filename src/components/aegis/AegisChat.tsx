@@ -51,6 +51,14 @@ export function AegisChat() {
     },
   });
 
+  // Handle sending message
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || isStreaming) return;
+    const message = input;
+    setInput("");
+    await sendMessage(message);
+  }, [input, isStreaming, sendMessage]);
+
   // Handle closing voice mode
   const handleCloseVoiceMode = useCallback(() => {
     if (isListening) {
@@ -59,17 +67,6 @@ export function AegisChat() {
     setVoiceModeOpen(false);
     setInterimTranscript("");
   }, [isListening, stopListening]);
-
-  // Auto-send message when voice mode captures text and closes
-  useEffect(() => {
-    if (!voiceModeOpen && input.trim() && !isStreaming) {
-      // Small delay to allow UI to settle
-      const timer = setTimeout(() => {
-        handleSend();
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [voiceModeOpen]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -103,13 +100,6 @@ export function AegisChat() {
       setTimeout(scrollToBottom, 400);
     }
   }, [currentConversationId, scrollToBottom]);
-
-  const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
-    const message = input;
-    setInput("");
-    await sendMessage(message);
-  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
