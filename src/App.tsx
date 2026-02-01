@@ -11,6 +11,7 @@ import MessagesPage from "./pages/MessagesPage";
 import AegisPage from "./pages/AegisPage";
 import AgentsPage from "./pages/AgentsPage";
 import ProfilePage from "./pages/ProfilePage";
+import InstallPage from "./pages/InstallPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +25,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/install" element={<InstallPage />} />
             <Route element={
               <ProtectedRoute>
                 <AppLayout />
