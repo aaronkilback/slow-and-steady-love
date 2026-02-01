@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2, MapPin } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,11 +8,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useEncryption } from "@/hooks/useEncryption";
 import { LocationMap } from "./LocationMap";
 import { AttachmentPicker, AttachmentPreviewBar, type Attachment } from "./AttachmentPicker";
 import { MessageAttachments, type MessageAttachment } from "./MessageAttachments";
 import { AegisAlert, AegisMonitoringBadge } from "./AegisAlert";
 import { SOSButton } from "./SOSButton";
+import { EncryptionStatus } from "@/components/encryption/EncryptionStatus";
+import { EncryptionSetup } from "@/components/encryption/EncryptionSetup";
+import { EncryptionUnlock } from "@/components/encryption/EncryptionUnlock";
 
 interface Message {
   id: string;
@@ -20,9 +24,13 @@ interface Message {
   sender_id: string;
   created_at: string;
   attachments?: MessageAttachment[];
+  encrypted?: boolean;
+  nonce?: string | null;
+  decryptedContent?: string;
   sender?: {
     full_name: string;
     avatar_url: string | null;
+    public_key?: string | null;
   };
 }
 
@@ -50,8 +58,26 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [uploadProgress, setUploadProgress] = useState(0);
   const [aegisAlert, setAegisAlert] = useState<AegisAnalysis | null>(null);
   const [isAegisActive, setIsAegisActive] = useState(true);
+  const [participants, setParticipants] = useState<Array<{ user_id: string; public_key: string | null }>>([]);
+  const [showEncryptionSetup, setShowEncryptionSetup] = useState(false);
+  const [showEncryptionUnlock, setShowEncryptionUnlock] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  
+  const { 
+    isInitialized, 
+    isUnlocked, 
+    needsSetup, 
+    publicKey,
+    encrypt, 
+    decrypt, 
+    setupEncryption, 
+    unlockEncryption,
+    getPublicKey 
+  } = useEncryption();
+
+  // Determine if encryption is possible (all participants have public keys)
+  const canEncrypt = isUnlocked && participants.every(p => p.public_key);
 
   useEffect(() => {
     loadMessages();
@@ -93,8 +119,10 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       .select(`
         name,
         conversation_participants (
+          user_id,
           profiles:user_id (
-            full_name
+            full_name,
+            public_key
           )
         )
       `)
@@ -106,6 +134,13 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         (data.conversation_participants as any)?.map((p: any) => p.profiles?.full_name).join(", ") || 
         "Conversation";
       setConversationName(name);
+      
+      // Extract participants with their public keys
+      const parts = (data.conversation_participants as any)?.map((p: any) => ({
+        user_id: p.user_id,
+        public_key: p.profiles?.public_key || null
+      })) || [];
+      setParticipants(parts);
     }
   };
 
@@ -120,23 +155,45 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         sender_id,
         created_at,
         attachments,
+        encrypted,
+        nonce,
         profiles:sender_id (
           full_name,
-          avatar_url
+          avatar_url,
+          public_key
         )
       `)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
     if (!error && data) {
-      const messagesWithSender = data.map((msg: any) => ({
-        ...msg,
-        sender: msg.profiles,
-        attachments: msg.attachments || [],
+      const messagesWithSender = await Promise.all(data.map(async (msg: any) => {
+        let decryptedContent = msg.content;
+        
+        // Try to decrypt if message is encrypted and we're unlocked
+        if (msg.encrypted && msg.nonce && isUnlocked && currentUserId) {
+          try {
+            const decrypted = await decrypt(msg.content, msg.nonce, msg.sender_id);
+            if (decrypted) {
+              decryptedContent = decrypted;
+            }
+          } catch (e) {
+            console.error("Decryption failed:", e);
+            decryptedContent = "🔒 [Unable to decrypt]";
+          }
+        }
+        
+        return {
+          ...msg,
+          sender: msg.profiles,
+          attachments: msg.attachments || [],
+          decryptedContent,
+        };
       }));
+      
       setMessages(messagesWithSender);
       
-      // Trigger Aegis analysis on new messages
+      // Trigger Aegis analysis on new messages (use decrypted content)
       if (isAegisActive && messagesWithSender.length > 0) {
         analyzeWithAegis(messagesWithSender);
       }
@@ -144,6 +201,13 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     
     setIsLoading(false);
   };
+
+  // Re-decrypt messages when encryption is unlocked
+  useEffect(() => {
+    if (isUnlocked && messages.some(m => m.encrypted && m.decryptedContent?.includes('[Unable to decrypt]'))) {
+      loadMessages();
+    }
+  }, [isUnlocked]);
 
   // Aegis AI monitoring
   const analyzeWithAegis = useCallback(async (recentMessages: Message[]) => {
@@ -227,16 +291,38 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       // Upload attachments first
       const uploadedAttachments = await uploadAttachments();
 
-      const messageData = {
+      let messageContent = newMessage.trim();
+      let messageNonce: string | null = null;
+      let isEncrypted = false;
+
+      // Encrypt message if possible
+      if (canEncrypt && messageContent) {
+        // For group chats, we'd need to encrypt for each recipient
+        // For now, encrypt for the first non-self participant
+        const otherParticipant = participants.find(p => p.user_id !== currentUserId && p.public_key);
+        
+        if (otherParticipant) {
+          const encrypted = await encrypt(messageContent, otherParticipant.user_id);
+          if (encrypted) {
+            messageContent = encrypted.ciphertext;
+            messageNonce = encrypted.nonce;
+            isEncrypted = true;
+          }
+        }
+      }
+
+      const messageData: any = {
         conversation_id: conversationId,
         sender_id: currentUserId,
-        content: newMessage.trim(),
+        content: messageContent,
         attachments: uploadedAttachments.length > 0 ? uploadedAttachments : [],
+        encrypted: isEncrypted,
+        nonce: messageNonce,
       };
 
       const { error } = await supabase
         .from('messages')
-        .insert(messageData as any);
+        .insert(messageData);
 
       if (error) {
         toast({
@@ -326,12 +412,27 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                 <h2 className="font-semibold text-foreground">{conversationName}</h2>
                 <AegisMonitoringBadge isActive={isAegisActive} />
               </div>
-              <p className="text-xs text-muted-foreground">Direct message</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">Direct message</p>
+                <EncryptionStatus isEncrypted={canEncrypt} isUnlocked={isUnlocked} />
+              </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setShowLocationMap(true)}>
-            <MapPin className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            {!isUnlocked && publicKey && (
+              <Button variant="ghost" size="icon" onClick={() => setShowEncryptionUnlock(true)}>
+                <Shield className="h-5 w-5 text-amber-500" />
+              </Button>
+            )}
+            {needsSetup && (
+              <Button variant="ghost" size="icon" onClick={() => setShowEncryptionSetup(true)}>
+                <Shield className="h-5 w-5 text-muted-foreground" />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon" onClick={() => setShowLocationMap(true)}>
+              <MapPin className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
 
         {/* Aegis Alert */}
@@ -399,7 +500,14 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                           )}
                           
                           {hasContent && (
-                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                            <div className="flex items-start gap-1">
+                              <p className="text-sm whitespace-pre-wrap flex-1">
+                                {message.encrypted ? (message.decryptedContent || message.content) : message.content}
+                              </p>
+                              {message.encrypted && (
+                                <Shield className="h-3 w-3 text-emerald-500 shrink-0 mt-0.5" />
+                              )}
+                            </div>
                           )}
                           
                           {hasAttachments && (
@@ -494,6 +602,32 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         conversationId={conversationId}
         isOpen={showLocationMap}
         onClose={() => setShowLocationMap(false)}
+      />
+
+      <EncryptionSetup
+        open={showEncryptionSetup}
+        onSetup={async (passphrase) => {
+          const success = await setupEncryption(passphrase);
+          if (success) {
+            setShowEncryptionSetup(false);
+            loadConversationDetails();
+          }
+          return success;
+        }}
+        onSkip={() => setShowEncryptionSetup(false)}
+      />
+
+      <EncryptionUnlock
+        open={showEncryptionUnlock}
+        onUnlock={async (passphrase) => {
+          const success = await unlockEncryption(passphrase);
+          if (success) {
+            setShowEncryptionUnlock(false);
+            loadMessages();
+          }
+          return success;
+        }}
+        onCancel={() => setShowEncryptionUnlock(false)}
       />
     </>
   );
