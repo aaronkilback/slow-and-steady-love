@@ -133,12 +133,18 @@ export function AegisChat() {
 
   // Watch for new assistant messages to speak
   useEffect(() => {
-    if (!voiceModeOpen || voiceState !== "processing") return;
+    if (!voiceModeOpen) return;
+    // Only trigger TTS when we're actively waiting for a response (processing state)
+    if (voiceState !== "processing") return;
     
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage || lastMessage.role !== "assistant") return;
-    if (lastMessage.id === lastMessageIdRef.current) return;
     if (isStreaming) return; // Wait for streaming to complete
+    
+    // Check if this is a new message we haven't spoken yet
+    if (lastMessage.id === lastMessageIdRef.current) return;
+    
+    console.log("[Voice] New assistant message detected, triggering TTS");
     
     // New complete assistant message
     lastMessageIdRef.current = lastMessage.id;
@@ -154,6 +160,7 @@ export function AegisChat() {
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       .replace(/[-•]/g, "");
     
+    console.log("[Voice] Speaking:", textToSpeak.substring(0, 100) + "...");
     speak(textToSpeak);
   }, [messages, isStreaming, voiceModeOpen, voiceState, speak]);
 
