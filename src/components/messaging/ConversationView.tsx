@@ -103,11 +103,22 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     };
   }, [conversationId]);
 
+  // Scroll to bottom when messages load or change
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    if (scrollRef.current && !isLoading) {
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        if (scrollRef.current) {
+          const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+          if (scrollContainer) {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+          } else {
+            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+          }
+        }
+      }, 50);
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const getCurrentUser = async () => {
     // Get user from Fortress auth
