@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { useAgents, useOperators, Agent, Operator } from "@/hooks/useFortressData";
+import { useAgents, useOperators, useAgentConversationAgents, Agent, Operator } from "@/hooks/useFortressData";
 
 type AgentStatus = "online" | "busy" | "offline";
 
@@ -185,17 +185,44 @@ function OperatorCard({ operator }: { operator: Operator }) {
 
 export function AgentDirectory() {
   const { data: fortressAgents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents();
+  const { data: conversationAgents = [], isLoading: conversationAgentsLoading, refetch: refetchConversationAgents } = useAgentConversationAgents();
   const { data: operators = [], isLoading: operatorsLoading, refetch: refetchOperators } = useOperators();
 
-  const isLoading = agentsLoading || operatorsLoading;
+  const isLoading = agentsLoading || operatorsLoading || conversationAgentsLoading;
   
-  // Merge default AI agents with any from Fortress
-  const aiAgents = fortressAgents.length > 0 
-    ? fortressAgents.filter(a => a.type === "ai")
-    : defaultAiAgents;
+  // Merge default AI agents with agents from Fortress and conversation history
+  const allAgentIds = new Set<string>();
+  const mergedAgents: Agent[] = [];
+  
+  // Add default agents first
+  defaultAiAgents.forEach(agent => {
+    if (!allAgentIds.has(agent.id)) {
+      allAgentIds.add(agent.id);
+      mergedAgents.push(agent);
+    }
+  });
+  
+  // Add Fortress agents
+  fortressAgents.filter(a => a.type === "ai").forEach(agent => {
+    if (!allAgentIds.has(agent.id)) {
+      allAgentIds.add(agent.id);
+      mergedAgents.push(agent);
+    }
+  });
+  
+  // Add agents from conversation history
+  conversationAgents.forEach(agent => {
+    if (!allAgentIds.has(agent.id)) {
+      allAgentIds.add(agent.id);
+      mergedAgents.push(agent);
+    }
+  });
+  
+  const aiAgents = mergedAgents;
 
   const handleRefresh = () => {
     refetchAgents();
+    refetchConversationAgents();
     refetchOperators();
   };
 

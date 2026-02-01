@@ -78,6 +78,47 @@ export function useAgents() {
   });
 }
 
+export function useAgentConversationAgents() {
+  return useQuery({
+    queryKey: ["fortress-conversation-agents"],
+    queryFn: async () => {
+      // Fetch unique agent names from agent_conversations
+      const { data, error } = await fortressClient
+        .from("agent_conversations")
+        .select("title")
+        .order("updated_at", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching agent conversations:", error);
+        return [];
+      }
+
+      // Extract unique agent names from conversation titles like "Chat with RYAN-INTEL"
+      const agentNames = new Set<string>();
+      (data || []).forEach((conv: { title: string | null }) => {
+        if (conv.title) {
+          const match = conv.title.match(/^Chat with (.+)$/);
+          if (match && match[1]) {
+            agentNames.add(match[1]);
+          }
+        }
+      });
+
+      // Convert to Agent objects
+      return Array.from(agentNames).map((name): Agent => ({
+        id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        name: name,
+        type: "ai",
+        role: "Specialized AI Agent",
+        description: `AI agent from your conversation history`,
+        status: "online",
+        capabilities: ["Intelligence Analysis", "Task Support"],
+      }));
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
 export function useOperators() {
   return useQuery({
     queryKey: ["fortress-operators"],
