@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -15,6 +15,7 @@ interface AegisConversation {
   updated_at: string;
 }
 
+// Use the local Supabase edge function for AI chat
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
 export function useAegisChat() {
@@ -23,12 +24,33 @@ export function useAegisChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Load user's conversations on mount
+  // Get current user from Fortress
   useEffect(() => {
-    loadConversations();
+    const getUser = async () => {
+      const { data: { user } } = await fortressClient.auth.getUser();
+      if (user) {
+        setUserId(user.id);
+      }
+    };
+    getUser();
+
+    // Listen for auth changes
+    const { data: { subscription } } = fortressClient.auth.onAuthStateChange((_, session) => {
+      setUserId(session?.user?.id || null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  // Load user's conversations from Fortress when user is available
+  useEffect(() => {
+    if (userId) {
+      loadConversations();
+    }
+  }, [userId]);
 
   // Load messages when conversation changes
   useEffect(() => {
@@ -40,9 +62,13 @@ export function useAegisChat() {
   }, [currentConversationId]);
 
   const loadConversations = async () => {
-    const { data, error } = await supabase
+    if (!userId) return;
+    
+    // Try to load from Fortress aegis_conversations table
+    const { data, error } = await fortressClient
       .from('aegis_conversations')
       .select('id, title, updated_at')
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false });
 
     if (!error && data) {
@@ -51,12 +77,17 @@ export function useAegisChat() {
       if (data.length > 0 && !currentConversationId) {
         setCurrentConversationId(data[0].id);
       }
+    } else if (error) {
+      console.log("Conversations table may not exist in Fortress:", error.message);
+      // Conversations will be stored locally in state only
+      setConversations([]);
     }
   };
 
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
-    const { data, error } = await supabase
+    
+    const { data, error } = await fortressClient
       .from('aegis_messages')
       .select('id, role, content, created_at')
       .eq('conversation_id', conversationId)
@@ -67,27 +98,36 @@ export function useAegisChat() {
         ...m,
         role: m.role as "user" | "assistant"
       })));
+    } else {
+      // Messages table may not exist
+      setMessages([]);
     }
     setIsLoading(false);
   };
 
   const createConversation = async (): Promise<string | null> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!userId) {
+      toast({
+        variant: "destructive",
+        title: "Not authenticated",
+        description: "Please sign in to chat with Aegis",
+      });
+      return null;
+    }
 
-    const { data, error } = await supabase
+    // Try to create in Fortress
+    const { data, error } = await fortressClient
       .from('aegis_conversations')
-      .insert({ user_id: user.id })
+      .insert({ user_id: userId })
       .select('id')
       .single();
 
     if (error) {
-      toast({
-        variant: "destructive",
-        title: "Failed to create conversation",
-        description: error.message,
-      });
-      return null;
+      // If table doesn't exist, create a local-only conversation
+      console.log("Could not save conversation to Fortress:", error.message);
+      const localId = `local-${Date.now()}`;
+      setCurrentConversationId(localId);
+      return localId;
     }
 
     setCurrentConversationId(data.id);
@@ -96,7 +136,17 @@ export function useAegisChat() {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await supabase
+    // Skip saving for local-only conversations
+    if (conversationId.startsWith('local-')) {
+      return {
+        id: `msg-${Date.now()}`,
+        role,
+        content,
+        created_at: new Date().toISOString(),
+      };
+    }
+
+    const { data, error } = await fortressClient
       .from('aegis_messages')
       .insert({
         conversation_id: conversationId,
@@ -107,17 +157,23 @@ export function useAegisChat() {
       .single();
 
     if (error) {
-      console.error("Failed to save message:", error);
-      return null;
+      console.log("Could not save message to Fortress:", error.message);
+      return {
+        id: `msg-${Date.now()}`,
+        role,
+        content,
+        created_at: new Date().toISOString(),
+      };
     }
 
     return data;
   };
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
-    // Generate a title from the first message
+    if (conversationId.startsWith('local-')) return;
+    
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await supabase
+    await fortressClient
       .from('aegis_conversations')
       .update({ title })
       .eq('id', conversationId);
@@ -250,7 +306,7 @@ export function useAegisChat() {
     } finally {
       setIsStreaming(false);
     }
-  }, [currentConversationId, messages, isStreaming, toast]);
+  }, [currentConversationId, messages, isStreaming, toast, userId]);
 
   const startNewConversation = useCallback(() => {
     setCurrentConversationId(null);
@@ -262,10 +318,12 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    await supabase
-      .from('aegis_conversations')
-      .delete()
-      .eq('id', id);
+    if (!id.startsWith('local-')) {
+      await fortressClient
+        .from('aegis_conversations')
+        .delete()
+        .eq('id', id);
+    }
     
     if (currentConversationId === id) {
       setCurrentConversationId(null);

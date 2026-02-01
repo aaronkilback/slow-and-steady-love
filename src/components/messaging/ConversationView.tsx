@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 import { useEncryption } from "@/hooks/useEncryption";
 import { LocationMap } from "./LocationMap";
@@ -109,37 +110,52 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   }, [messages]);
 
   const getCurrentUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // Get user from Fortress auth
+    const { data: { user } } = await fortressClient.auth.getUser();
     if (user) setCurrentUserId(user.id);
   };
 
   const loadConversationDetails = async () => {
+    // First get conversation with participants
     const { data, error } = await supabase
       .from('conversations')
       .select(`
         name,
         conversation_participants (
-          user_id,
-          profiles:user_id (
-            full_name,
-            public_key
-          )
+          user_id
         )
       `)
       .eq('id', conversationId)
       .single();
 
     if (data) {
+      const participantIds = (data.conversation_participants as any)?.map((p: any) => p.user_id) || [];
+      
+      // Fetch profiles for participants from Fortress
+      let profilesMap: Record<string, { full_name: string; public_key: string | null }> = {};
+      if (participantIds.length > 0) {
+        const { data: profilesData } = await fortressClient
+          .from('profiles')
+          .select('id, full_name, public_key')
+          .in('id', participantIds);
+        
+        if (profilesData) {
+          profilesMap = Object.fromEntries(
+            profilesData.map(p => [p.id, { full_name: p.full_name, public_key: p.public_key }])
+          );
+        }
+      }
+      
       const name = data.name || 
-        (data.conversation_participants as any)?.map((p: any) => p.profiles?.full_name).join(", ") || 
+        participantIds.map((id: string) => profilesMap[id]?.full_name).filter(Boolean).join(", ") || 
         "Conversation";
       setConversationName(name);
       
       // Extract participants with their public keys
-      const parts = (data.conversation_participants as any)?.map((p: any) => ({
-        user_id: p.user_id,
-        public_key: p.profiles?.public_key || null
-      })) || [];
+      const parts = participantIds.map((id: string) => ({
+        user_id: id,
+        public_key: profilesMap[id]?.public_key || null
+      }));
       setParticipants(parts);
     }
   };
@@ -147,6 +163,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const loadMessages = async () => {
     setIsLoading(true);
     
+    // First get messages
     const { data, error } = await supabase
       .from('messages')
       .select(`
@@ -156,17 +173,30 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         created_at,
         attachments,
         encrypted,
-        nonce,
-        profiles:sender_id (
-          full_name,
-          avatar_url,
-          public_key
-        )
+        nonce
       `)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
     if (!error && data) {
+      // Get unique sender IDs
+      const senderIds = [...new Set(data.map((m: any) => m.sender_id))];
+      
+      // Fetch profiles from Fortress
+      let profilesMap: Record<string, { full_name: string; avatar_url: string | null; public_key: string | null }> = {};
+      if (senderIds.length > 0) {
+        const { data: profilesData } = await fortressClient
+          .from('profiles')
+          .select('id, full_name, avatar_url, public_key')
+          .in('id', senderIds);
+        
+        if (profilesData) {
+          profilesMap = Object.fromEntries(
+            profilesData.map(p => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url, public_key: p.public_key }])
+          );
+        }
+      }
+      
       const messagesWithSender = await Promise.all(data.map(async (msg: any) => {
         let decryptedContent = msg.content;
         
@@ -185,7 +215,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         
         return {
           ...msg,
-          sender: msg.profiles,
+          sender: profilesMap[msg.sender_id] || { full_name: 'Unknown', avatar_url: null, public_key: null },
           attachments: msg.attachments || [],
           decryptedContent,
         };
