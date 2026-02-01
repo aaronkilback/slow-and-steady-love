@@ -10,12 +10,15 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { LocationMap } from "./LocationMap";
+import { AttachmentPicker, AttachmentPreviewBar, type Attachment } from "./AttachmentPicker";
+import { MessageAttachments, type MessageAttachment } from "./MessageAttachments";
 
 interface Message {
   id: string;
   content: string;
   sender_id: string;
   created_at: string;
+  attachments?: MessageAttachment[];
   sender?: {
     full_name: string;
     avatar_url: string | null;
@@ -35,6 +38,8 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [conversationName, setConversationName] = useState("");
   const [showLocationMap, setShowLocationMap] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -104,6 +109,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         content,
         sender_id,
         created_at,
+        attachments,
         profiles:sender_id (
           full_name,
           avatar_url
@@ -116,6 +122,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       const messagesWithSender = data.map((msg: any) => ({
         ...msg,
         sender: msg.profiles,
+        attachments: msg.attachments || [],
       }));
       setMessages(messagesWithSender);
     }
@@ -123,28 +130,83 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     setIsLoading(false);
   };
 
+  const uploadAttachments = async (): Promise<MessageAttachment[]> => {
+    if (!currentUserId || attachments.length === 0) return [];
+
+    const uploadedAttachments: MessageAttachment[] = [];
+    
+    for (let i = 0; i < attachments.length; i++) {
+      const attachment = attachments[i];
+      const fileExt = attachment.name.split('.').pop();
+      const fileName = `${currentUserId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      
+      const { data, error } = await supabase.storage
+        .from('message-attachments')
+        .upload(fileName, attachment.file);
+
+      if (error) {
+        console.error('Upload error:', error);
+        continue;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('message-attachments')
+        .getPublicUrl(fileName);
+
+      uploadedAttachments.push({
+        url: urlData.publicUrl,
+        type: attachment.type,
+        name: attachment.name,
+        size: attachment.size,
+      });
+
+      setUploadProgress(((i + 1) / attachments.length) * 100);
+    }
+
+    return uploadedAttachments;
+  };
+
   const handleSend = async () => {
-    if (!newMessage.trim() || isSending || !currentUserId) return;
+    if ((!newMessage.trim() && attachments.length === 0) || isSending || !currentUserId) return;
 
     setIsSending(true);
-    const { error } = await supabase
-      .from('messages')
-      .insert({
+    setUploadProgress(0);
+
+    try {
+      // Upload attachments first
+      const uploadedAttachments = await uploadAttachments();
+
+      const messageData = {
         conversation_id: conversationId,
         sender_id: currentUserId,
         content: newMessage.trim(),
-      });
+        attachments: uploadedAttachments.length > 0 ? uploadedAttachments : [],
+      };
 
-    if (error) {
+      const { error } = await supabase
+        .from('messages')
+        .insert(messageData as any);
+
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Failed to send message",
+          description: error.message,
+        });
+      } else {
+        setNewMessage("");
+        setAttachments([]);
+      }
+    } catch (err) {
       toast({
         variant: "destructive",
         title: "Failed to send message",
-        description: error.message,
+        description: "An error occurred while sending your message.",
       });
-    } else {
-      setNewMessage("");
     }
+    
     setIsSending(false);
+    setUploadProgress(0);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -152,6 +214,20 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleAddAttachments = (newAttachments: Attachment[]) => {
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  };
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const attachment = prev.find((a) => a.id === id);
+      if (attachment?.preview) {
+        URL.revokeObjectURL(attachment.preview);
+      }
+      return prev.filter((a) => a.id !== id);
+    });
   };
 
   return (
@@ -183,98 +259,143 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
           </DropdownMenu>
         </div>
 
-      {/* Messages */}
-      <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
-        <div className="space-y-4 pb-4">
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-          ) : (
-            <AnimatePresence initial={false}>
-              {messages.map((message) => {
-                const isOwn = message.sender_id === currentUserId;
-                return (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className={cn("flex", isOwn ? "justify-end" : "justify-start")}
-                  >
-                    <div className={cn("flex gap-2 max-w-[85%]", isOwn && "flex-row-reverse")}>
-                      {!isOwn && (
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={message.sender?.avatar_url || undefined} />
-                          <AvatarFallback className="text-xs">
-                            {message.sender?.full_name?.charAt(0) || "?"}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                      <div
-                        className={cn(
-                          "rounded-2xl px-4 py-2",
-                          isOwn
-                            ? "bg-primary text-primary-foreground rounded-br-md"
-                            : "bg-card border border-border rounded-bl-md"
-                        )}
-                      >
-                        {!isOwn && (
-                          <p className="text-xs font-medium text-primary mb-1">
-                            {message.sender?.full_name}
-                          </p>
-                        )}
-                        <p className="text-sm">{message.content}</p>
-                        <p className={cn(
-                          "text-[10px] mt-1",
-                          isOwn ? "text-primary-foreground/70" : "text-muted-foreground"
-                        )}>
-                          {new Date(message.created_at).toLocaleTimeString([], { 
-                            hour: "2-digit", 
-                            minute: "2-digit" 
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-          )}
-
-          {messages.length === 0 && !isLoading && (
-            <div className="text-center py-8 text-muted-foreground">
-              <p>No messages yet</p>
-              <p className="text-sm">Send a message to start the conversation</p>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
-
-      {/* Input */}
-      <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
-        <div className="flex items-center gap-2">
-          <Input
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder="Type a message..."
-            className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
-            disabled={isSending}
-          />
-          <Button
-            size="icon"
-            onClick={handleSend}
-            disabled={!newMessage.trim() || isSending}
-          >
-            {isSending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+        {/* Messages */}
+        <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
+          <div className="space-y-4 pb-4">
+            {isLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
             ) : (
-              <Send className="h-5 w-5" />
+              <AnimatePresence initial={false}>
+                {messages.map((message) => {
+                  const isOwn = message.sender_id === currentUserId;
+                  const hasContent = message.content.trim().length > 0;
+                  const hasAttachments = message.attachments && message.attachments.length > 0;
+                  
+                  return (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className={cn("flex", isOwn ? "justify-end" : "justify-start")}
+                    >
+                      <div className={cn("flex gap-2 max-w-[85%]", isOwn && "flex-row-reverse")}>
+                        {!isOwn && (
+                          <Avatar className="h-8 w-8 flex-shrink-0">
+                            <AvatarImage src={message.sender?.avatar_url || undefined} />
+                            <AvatarFallback className="text-xs">
+                              {message.sender?.full_name?.charAt(0) || "?"}
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        <div
+                          className={cn(
+                            "rounded-2xl overflow-hidden",
+                            isOwn
+                              ? "bg-primary text-primary-foreground rounded-br-md"
+                              : "bg-card border border-border rounded-bl-md",
+                            hasContent ? "px-4 py-2" : hasAttachments ? "p-1" : "px-4 py-2"
+                          )}
+                        >
+                          {!isOwn && hasContent && (
+                            <p className="text-xs font-medium text-primary mb-1">
+                              {message.sender?.full_name}
+                            </p>
+                          )}
+                          
+                          {hasContent && (
+                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                          )}
+                          
+                          {hasAttachments && (
+                            <MessageAttachments 
+                              attachments={message.attachments!} 
+                              isOwn={isOwn} 
+                            />
+                          )}
+                          
+                          <p className={cn(
+                            "text-[10px] mt-1",
+                            isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
+                            !hasContent && hasAttachments && "px-3 pb-1"
+                          )}>
+                            {new Date(message.created_at).toLocaleTimeString([], { 
+                              hour: "2-digit", 
+                              minute: "2-digit" 
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             )}
-          </Button>
+
+            {messages.length === 0 && !isLoading && (
+              <div className="text-center py-8 text-muted-foreground">
+                <p>No messages yet</p>
+                <p className="text-sm">Send a message to start the conversation</p>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+
+        {/* Attachment Preview */}
+        <AnimatePresence>
+          {attachments.length > 0 && (
+            <AttachmentPreviewBar
+              attachments={attachments}
+              onRemove={handleRemoveAttachment}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Upload Progress */}
+        {isSending && uploadProgress > 0 && uploadProgress < 100 && (
+          <div className="px-4 pb-2">
+            <div className="h-1 bg-secondary rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-primary"
+                initial={{ width: 0 }}
+                animate={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
+          <div className="flex items-center gap-2">
+            <AttachmentPicker
+              attachments={attachments}
+              onAdd={handleAddAttachments}
+              onRemove={handleRemoveAttachment}
+              disabled={isSending}
+            />
+            <Input
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Type a message..."
+              className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
+              disabled={isSending}
+            />
+            <Button
+              size="icon"
+              onClick={handleSend}
+              disabled={(!newMessage.trim() && attachments.length === 0) || isSending}
+            >
+              {isSending ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
+          </div>
         </div>
-      </div>
       </div>
 
       <LocationMap
