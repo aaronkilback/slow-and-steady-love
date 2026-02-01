@@ -1,18 +1,23 @@
 import { useState, useEffect } from "react";
-import { Loader2, Search, User } from "lucide-react";
+import { Loader2, Search, User, Users, Check } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 interface Profile {
   id: string;
@@ -32,12 +37,18 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [mode, setMode] = useState<"direct" | "group">("direct");
+  const [selectedUsers, setSelectedUsers] = useState<Profile[]>([]);
+  const [groupName, setGroupName] = useState("");
   const { toast } = useToast();
 
   useEffect(() => {
     if (open) {
       loadProfiles();
       getCurrentUser();
+      setSelectedUsers([]);
+      setGroupName("");
+      setMode("direct");
     }
   }, [open]);
 
@@ -48,9 +59,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
   const loadProfiles = async () => {
     setIsLoading(true);
-    
     const { data: { user } } = await supabase.auth.getUser();
-    
     const { data, error } = await supabase
       .from('profiles')
       .select('id, full_name, avatar_url')
@@ -59,45 +68,58 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
     if (!error && data) {
       setProfiles(data);
     }
-    
     setIsLoading(false);
   };
 
-  const createConversation = async (userId: string) => {
+  const toggleUserSelection = (profile: Profile) => {
+    if (mode === "direct") {
+      // Direct message - immediately create conversation
+      createConversation([profile.id], false);
+    } else {
+      // Group mode - toggle selection
+      setSelectedUsers(prev => 
+        prev.find(u => u.id === profile.id)
+          ? prev.filter(u => u.id !== profile.id)
+          : [...prev, profile]
+      );
+    }
+  };
+
+  const createConversation = async (userIds: string[], isGroup: boolean) => {
     if (!currentUserId || isCreating) return;
-    
     setIsCreating(true);
 
-    // Check if conversation already exists
-    const { data: existingConvs } = await supabase
-      .from('conversation_participants')
-      .select('conversation_id')
-      .eq('user_id', currentUserId);
+    // For direct messages, check if conversation already exists
+    if (!isGroup && userIds.length === 1) {
+      const { data: existingConvs } = await supabase
+        .from('conversation_participants')
+        .select('conversation_id')
+        .eq('user_id', currentUserId);
 
-    if (existingConvs) {
-      for (const conv of existingConvs) {
-        const { data: otherParticipant } = await supabase
-          .from('conversation_participants')
-          .select('user_id')
-          .eq('conversation_id', conv.conversation_id)
-          .eq('user_id', userId)
-          .single();
+      if (existingConvs) {
+        for (const conv of existingConvs) {
+          const { data: otherParticipant } = await supabase
+            .from('conversation_participants')
+            .select('user_id')
+            .eq('conversation_id', conv.conversation_id)
+            .eq('user_id', userIds[0])
+            .single();
 
-        if (otherParticipant) {
-          // Conversation already exists
-          onConversationCreated(conv.conversation_id);
-          onOpenChange(false);
-          setIsCreating(false);
-          return;
+          if (otherParticipant) {
+            onConversationCreated(conv.conversation_id);
+            onOpenChange(false);
+            setIsCreating(false);
+            return;
+          }
         }
       }
     }
 
-    // Create new conversation using the security definer function
+    // Create new conversation
     const { data: newConvId, error: convError } = await supabase
       .rpc('create_conversation_with_participant', {
-        _name: null,
-        _is_group: false
+        _name: isGroup ? (groupName || `Group (${userIds.length + 1})`) : null,
+        _is_group: isGroup
       });
 
     if (convError || !newConvId) {
@@ -110,31 +132,44 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
       return;
     }
 
-    // Add the other user to the conversation
+    // Add all selected users to the conversation
     const { error: participantError } = await supabase
       .from('conversation_participants')
-      .insert({
+      .insert(userIds.map(userId => ({
         conversation_id: newConvId,
         user_id: userId,
-      });
+      })));
 
     if (participantError) {
       toast({
         variant: "destructive",
-        title: "Failed to add participant",
+        title: "Failed to add participants",
         description: participantError.message,
       });
     } else {
       onConversationCreated(newConvId);
       onOpenChange(false);
     }
-    
     setIsCreating(false);
+  };
+
+  const handleCreateGroup = () => {
+    if (selectedUsers.length < 2) {
+      toast({
+        variant: "destructive",
+        title: "Select at least 2 members",
+        description: "Groups need at least 2 other members.",
+      });
+      return;
+    }
+    createConversation(selectedUsers.map(u => u.id), true);
   };
 
   const filteredProfiles = profiles.filter((profile) =>
     profile.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const isSelected = (id: string) => selectedUsers.some(u => u.id === id);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -142,9 +177,45 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
         <DialogHeader>
           <DialogTitle>New Conversation</DialogTitle>
           <DialogDescription>
-            Select an operator to start a conversation
+            Start a direct message or create a group
           </DialogDescription>
         </DialogHeader>
+
+        <Tabs value={mode} onValueChange={(v) => { setMode(v as "direct" | "group"); setSelectedUsers([]); }}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="direct" className="gap-2">
+              <User className="h-4 w-4" />
+              Direct
+            </TabsTrigger>
+            <TabsTrigger value="group" className="gap-2">
+              <Users className="h-4 w-4" />
+              Group
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {mode === "group" && (
+          <Input
+            placeholder="Group name (optional)"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+          />
+        )}
+
+        {mode === "group" && selectedUsers.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {selectedUsers.map(user => (
+              <Badge 
+                key={user.id} 
+                variant="secondary" 
+                className="cursor-pointer"
+                onClick={() => toggleUserSelection(user)}
+              >
+                {user.full_name} ×
+              </Badge>
+            ))}
+          </div>
+        )}
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -156,7 +227,7 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
           />
         </div>
 
-        <ScrollArea className="h-[300px]">
+        <ScrollArea className="h-[250px]">
           <div className="space-y-2">
             {isLoading ? (
               <div className="flex justify-center py-8">
@@ -166,8 +237,11 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
               filteredProfiles.map((profile) => (
                 <Card
                   key={profile.id}
-                  className="p-3 cursor-pointer hover:bg-card/80 transition-colors"
-                  onClick={() => createConversation(profile.id)}
+                  className={cn(
+                    "p-3 cursor-pointer transition-colors",
+                    isSelected(profile.id) ? "bg-primary/10 border-primary" : "hover:bg-card/80"
+                  )}
+                  onClick={() => toggleUserSelection(profile)}
                 >
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
@@ -180,7 +254,10 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
                       <p className="font-medium">{profile.full_name}</p>
                       <p className="text-xs text-muted-foreground">Operator</p>
                     </div>
-                    {isCreating && (
+                    {mode === "group" && isSelected(profile.id) && (
+                      <Check className="h-5 w-5 text-primary" />
+                    )}
+                    {isCreating && mode === "direct" && (
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     )}
                   </div>
@@ -196,6 +273,23 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
             )}
           </div>
         </ScrollArea>
+
+        {mode === "group" && (
+          <DialogFooter>
+            <Button 
+              onClick={handleCreateGroup} 
+              disabled={selectedUsers.length < 2 || isCreating}
+              className="w-full"
+            >
+              {isCreating ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Users className="h-4 w-4 mr-2" />
+              )}
+              Create Group ({selectedUsers.length} members)
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
