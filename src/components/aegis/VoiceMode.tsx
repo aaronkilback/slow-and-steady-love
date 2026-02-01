@@ -1,25 +1,59 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, X, Shield } from "lucide-react";
+import { Mic, MicOff, X, Shield, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+type VoiceState = "idle" | "listening" | "processing" | "speaking";
+
 interface VoiceModeProps {
   isOpen: boolean;
-  isListening: boolean;
+  voiceState: VoiceState;
   isSupported: boolean;
   interimTranscript: string;
+  currentTranscript: string;
+  aegisResponse: string;
   onClose: () => void;
   onToggleListening: () => void;
+  onStopSpeaking: () => void;
 }
 
 export function VoiceMode({
   isOpen,
-  isListening,
+  voiceState,
   isSupported,
   interimTranscript,
+  currentTranscript,
+  aegisResponse,
   onClose,
   onToggleListening,
+  onStopSpeaking,
 }: VoiceModeProps) {
+  const isListening = voiceState === "listening";
+  const isProcessing = voiceState === "processing";
+  const isSpeaking = voiceState === "speaking";
+
+  const getStatusText = () => {
+    if (!isSupported) return "Voice not supported in this browser";
+    switch (voiceState) {
+      case "listening":
+        return "Listening...";
+      case "processing":
+        return "Aegis is thinking...";
+      case "speaking":
+        return "Aegis is speaking...";
+      default:
+        return "Tap the microphone to speak";
+    }
+  };
+
+  const handleCenterButtonClick = () => {
+    if (isSpeaking) {
+      onStopSpeaking();
+    } else {
+      onToggleListening();
+    }
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -50,9 +84,9 @@ export function VoiceMode({
             <span className="text-xl font-semibold text-foreground">Silent Shield</span>
           </motion.div>
 
-          {/* Main microphone area */}
+          {/* Main area */}
           <div className="relative flex items-center justify-center">
-            {/* Animated rings */}
+            {/* Animated rings for listening */}
             {isListening && (
               <>
                 {[...Array(3)].map((_, i) => (
@@ -73,8 +107,45 @@ export function VoiceMode({
                     }}
                   />
                 ))}
+              </>
+            )}
 
-                {/* Static glowing rings */}
+            {/* Animated rings for speaking */}
+            {isSpeaking && (
+              <>
+                {[...Array(3)].map((_, i) => (
+                  <motion.div
+                    key={`speak-${i}`}
+                    className="absolute rounded-full border border-accent/40"
+                    initial={{ width: 180, height: 180, opacity: 0 }}
+                    animate={{
+                      width: [180, 200 + i * 30, 240 + i * 30],
+                      height: [180, 200 + i * 30, 240 + i * 30],
+                      opacity: [0.5, 0.2, 0],
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      delay: i * 0.3,
+                      ease: "easeOut",
+                    }}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Processing spinner rings */}
+            {isProcessing && (
+              <motion.div
+                className="absolute h-[200px] w-[200px] rounded-full border-2 border-dashed border-primary/40"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+              />
+            )}
+
+            {/* Static glowing rings */}
+            {(isListening || isSpeaking) && (
+              <>
                 <div className="absolute h-[280px] w-[280px] rounded-full border border-primary/20" />
                 <div className="absolute h-[320px] w-[320px] rounded-full border border-primary/10" />
                 <div className="absolute h-[360px] w-[360px] rounded-full border border-primary/5" />
@@ -97,40 +168,49 @@ export function VoiceMode({
               </>
             )}
 
-            {/* Center microphone button */}
+            {/* Center button */}
             <motion.button
-              onClick={onToggleListening}
-              disabled={!isSupported}
+              onClick={handleCenterButtonClick}
+              disabled={!isSupported || isProcessing}
               className={cn(
                 "relative z-10 flex h-40 w-40 items-center justify-center rounded-full transition-all",
                 "bg-gradient-to-b from-card to-background",
                 "border border-primary/30",
                 "shadow-[0_0_60px_-10px_hsl(var(--primary))]",
-                isListening && "shadow-[0_0_80px_-5px_hsl(var(--primary))]",
-                !isSupported && "opacity-50 cursor-not-allowed"
+                (isListening || isSpeaking) && "shadow-[0_0_80px_-5px_hsl(var(--primary))]",
+                (!isSupported || isProcessing) && "opacity-50 cursor-not-allowed"
               )}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              animate={isListening ? { scale: [1, 1.02, 1] } : {}}
-              transition={isListening ? { duration: 1.5, repeat: Infinity } : {}}
+              animate={(isListening || isSpeaking) ? { scale: [1, 1.02, 1] } : {}}
+              transition={(isListening || isSpeaking) ? { duration: 1.5, repeat: Infinity } : {}}
             >
-              {/* Inner glow ring */}
+              {/* Inner glow rings */}
               <div className={cn(
                 "absolute inset-2 rounded-full border transition-colors",
-                isListening ? "border-primary/50" : "border-primary/20"
+                (isListening || isSpeaking) ? "border-primary/50" : "border-primary/20"
               )} />
               <div className={cn(
                 "absolute inset-4 rounded-full border transition-colors",
-                isListening ? "border-primary/30" : "border-primary/10"
+                (isListening || isSpeaking) ? "border-primary/30" : "border-primary/10"
               )} />
               
-              {/* Microphone icon */}
+              {/* Icon based on state */}
               <motion.div
-                animate={isListening ? { scale: [1, 1.1, 1] } : {}}
+                animate={(isListening || isSpeaking) ? { scale: [1, 1.1, 1] } : {}}
                 transition={{ duration: 1.5, repeat: Infinity }}
               >
-                {isListening ? (
+                {isSpeaking ? (
+                  <VolumeX className="h-12 w-12 text-primary" />
+                ) : isListening ? (
                   <MicOff className="h-12 w-12 text-primary" />
+                ) : isProcessing ? (
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Shield className="h-12 w-12 text-primary" />
+                  </motion.div>
                 ) : (
                   <Mic className="h-12 w-12 text-primary" />
                 )}
@@ -145,47 +225,72 @@ export function VoiceMode({
             transition={{ delay: 0.2 }}
             className="mt-12 text-center"
           >
-            {!isSupported ? (
-              <p className="text-muted-foreground">Voice not supported in this browser</p>
-            ) : isListening ? (
-              <motion.p
-                className="text-xl text-foreground font-light tracking-wide"
-                animate={{ opacity: [1, 0.5, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                Listening...
-              </motion.p>
-            ) : (
-              <p className="text-muted-foreground">Tap the microphone to speak</p>
-            )}
+            <motion.p
+              className={cn(
+                "text-xl font-light tracking-wide",
+                (isListening || isSpeaking || isProcessing) ? "text-foreground" : "text-muted-foreground"
+              )}
+              animate={(isListening || isProcessing) ? { opacity: [1, 0.5, 1] } : {}}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            >
+              {getStatusText()}
+            </motion.p>
           </motion.div>
 
-          {/* Interim transcript display */}
-          <AnimatePresence mode="wait">
-            {interimTranscript && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="absolute bottom-32 max-w-md px-6 text-center"
-              >
-                <p className="text-lg text-primary/80 italic">"{interimTranscript}"</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Transcript displays */}
+          <div className="absolute bottom-24 max-w-md px-6 text-center space-y-4">
+            {/* User's captured text */}
+            <AnimatePresence mode="wait">
+              {(currentTranscript || interimTranscript) && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <p className="text-sm text-muted-foreground mb-1">You said:</p>
+                  <p className="text-lg text-foreground">
+                    "{currentTranscript}{interimTranscript && <span className="text-primary/60">{interimTranscript}</span>}"
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Aegis response preview */}
+            <AnimatePresence mode="wait">
+              {aegisResponse && isSpeaking && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <p className="text-sm text-primary mb-1">Aegis:</p>
+                  <p className="text-base text-muted-foreground line-clamp-3">
+                    {aegisResponse}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Bottom decorative element */}
           <div className="absolute bottom-8 flex items-center gap-2">
             <div className="h-px w-16 bg-gradient-to-r from-transparent to-primary/30" />
             <div className="h-10 w-10 rounded-full border border-primary/20 flex items-center justify-center">
-              <Mic className="h-4 w-4 text-primary/50" />
+              {isSpeaking ? (
+                <Volume2 className="h-4 w-4 text-primary/50" />
+              ) : (
+                <Mic className="h-4 w-4 text-primary/50" />
+              )}
             </div>
             <div className="h-px w-16 bg-gradient-to-l from-transparent to-primary/30" />
           </div>
 
           {/* Ambient glow effects */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[500px] rounded-full bg-primary/5 blur-3xl" />
+            <div className={cn(
+              "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[500px] w-[500px] rounded-full blur-3xl transition-colors duration-500",
+              isSpeaking ? "bg-accent/10" : "bg-primary/5"
+            )} />
           </div>
         </motion.div>
       )}
