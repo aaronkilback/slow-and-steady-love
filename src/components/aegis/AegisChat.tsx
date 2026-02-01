@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
+import { Send, Mic, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
 
@@ -34,15 +35,41 @@ export function AegisChat() {
   } = useAegisChat();
 
   const [input, setInput] = useState("");
+  const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Speech recognition hook
-  const { isListening, isSupported, toggleListening } = useSpeechRecognition({
+  const { isListening, isSupported, toggleListening, stopListening } = useSpeechRecognition({
     onTranscript: (transcript) => {
       setInput((prev) => prev + transcript);
+      setInterimTranscript("");
+    },
+    onInterimTranscript: (transcript) => {
+      setInterimTranscript(transcript);
     },
   });
+
+  // Handle closing voice mode
+  const handleCloseVoiceMode = useCallback(() => {
+    if (isListening) {
+      stopListening();
+    }
+    setVoiceModeOpen(false);
+    setInterimTranscript("");
+  }, [isListening, stopListening]);
+
+  // Auto-send message when voice mode captures text and closes
+  useEffect(() => {
+    if (!voiceModeOpen && input.trim() && !isStreaming) {
+      // Small delay to allow UI to settle
+      const timer = setTimeout(() => {
+        handleSend();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [voiceModeOpen]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -247,21 +274,14 @@ export function AegisChat() {
       <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
         <div className="flex items-center gap-2">
           <Button
-            variant={isListening ? "default" : "ghost"}
+            variant="ghost"
             size="icon"
-            onClick={toggleListening}
+            onClick={() => setVoiceModeOpen(true)}
             disabled={!isSupported}
-            className={cn(
-              "shrink-0 transition-all",
-              isListening && "bg-primary glow-cyan animate-pulse-glow"
-            )}
-            title={!isSupported ? "Speech recognition not supported" : isListening ? "Stop listening" : "Start voice input"}
+            className="shrink-0 transition-all hover:text-primary"
+            title={!isSupported ? "Speech recognition not supported" : "Open voice mode"}
           >
-            {isListening ? (
-              <MicOff className="h-5 w-5" />
-            ) : (
-              <Mic className="h-5 w-5" />
-            )}
+            <Mic className="h-5 w-5" />
           </Button>
           <Input
             ref={inputRef}
@@ -282,6 +302,16 @@ export function AegisChat() {
           </Button>
         </div>
       </div>
+
+      {/* Fullscreen Voice Mode */}
+      <VoiceMode
+        isOpen={voiceModeOpen}
+        isListening={isListening}
+        isSupported={isSupported}
+        interimTranscript={interimTranscript}
+        onClose={handleCloseVoiceMode}
+        onToggleListening={toggleListening}
+      />
     </div>
   );
 }
