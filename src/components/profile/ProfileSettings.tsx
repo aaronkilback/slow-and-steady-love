@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint } from "lucide-react";
+import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint, BellOff, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { MuteSettings } from "./MuteSettings";
 
 interface SettingItemProps {
   icon: React.ElementType;
@@ -41,23 +44,78 @@ function SettingItem({ icon: Icon, label, description, action, onClick }: Settin
   );
 }
 
+interface Profile {
+  full_name: string;
+  avatar_url: string | null;
+}
+
 export function ProfileSettings() {
   const [pushNotifications, setPushNotifications] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [userEmail, setUserEmail] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const navigate = useNavigate();
+  const { toast } = useToast();
 
-  // Mock user data - will be replaced with auth data
-  const user = {
-    name: "Operator Alpha",
-    email: "operator@silentshield.com",
-    role: "Security Analyst",
-    avatar: null,
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    setIsLoading(true);
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setUserEmail(user.email || "");
+      
+      const { data } = await supabase
+        .from('profiles')
+        .select('full_name, avatar_url')
+        .eq('id', user.id)
+        .single();
+      
+      if (data) {
+        setProfile(data);
+      }
+    }
+    
+    setIsLoading(false);
   };
 
-  const handleLogout = () => {
-    // TODO: Implement logout with Supabase auth
-    console.log("Logging out...");
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    const { error } = await supabase.auth.signOut();
+    
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Logout failed",
+        description: error.message,
+      });
+      setIsLoggingOut(false);
+    } else {
+      navigate("/auth", { replace: true });
+    }
   };
+
+  const displayName = profile?.full_name || "Operator";
+  const initials = displayName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <ScrollArea className="flex-1 px-4 py-4">
@@ -66,18 +124,26 @@ export function ProfileSettings() {
         <Card className="p-4 border-border bg-card">
           <div className="flex items-center gap-4">
             <Avatar className="h-16 w-16 border-2 border-primary">
-              <AvatarImage src={user.avatar || undefined} />
+              <AvatarImage src={profile?.avatar_url || undefined} />
               <AvatarFallback className="bg-primary/20 text-primary text-lg">
-                {user.name.split(" ").map(n => n[0]).join("")}
+                {initials}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
-              <h2 className="text-lg font-semibold text-foreground">{user.name}</h2>
-              <p className="text-sm text-primary">{user.role}</p>
-              <p className="text-xs text-muted-foreground">{user.email}</p>
+              <h2 className="text-lg font-semibold text-foreground">{displayName}</h2>
+              <p className="text-sm text-primary">Operator</p>
+              <p className="text-xs text-muted-foreground">{userEmail}</p>
             </div>
           </div>
         </Card>
+
+        {/* Mute Schedule */}
+        <div>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+            Do Not Disturb
+          </h3>
+          <MuteSettings />
+        </div>
 
         {/* Notifications Section */}
         <div>
@@ -175,8 +241,13 @@ export function ProfileSettings() {
           variant="destructive"
           className="w-full"
           onClick={handleLogout}
+          disabled={isLoggingOut}
         >
-          <LogOut className="h-4 w-4 mr-2" />
+          {isLoggingOut ? (
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          ) : (
+            <LogOut className="h-4 w-4 mr-2" />
+          )}
           Sign Out
         </Button>
 
