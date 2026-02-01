@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -20,6 +21,8 @@ I'm your lead AI security agent, ready to assist with:
 - 📊 **Intelligence Briefings** — Get security updates and reports
 
 How can I assist you today, Operator?`;
+
+type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
 export function AegisChat() {
   const {
@@ -36,14 +39,41 @@ export function AegisChat() {
 
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [interimTranscript, setInterimTranscript] = useState("");
+  const [currentTranscript, setCurrentTranscript] = useState("");
+  const [aegisResponse, setAegisResponse] = useState("");
+  const [pendingVoiceMessage, setPendingVoiceMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
+
+  // Track when speech ends to resume listening
+  const handleSpeechEnd = useCallback(() => {
+    if (voiceModeOpen) {
+      setVoiceState("idle");
+      setAegisResponse("");
+      // Small delay then start listening again for continuous conversation
+      setTimeout(() => {
+        if (voiceModeOpen) {
+          setCurrentTranscript("");
+          startListening();
+          setVoiceState("listening");
+        }
+      }, 500);
+    }
+  }, [voiceModeOpen]);
+
+  // Speech synthesis hook
+  const { speak, stop: stopSpeaking, isSpeaking, isSupported: synthSupported } = useSpeechSynthesis({
+    rate: 1,
+    onEnd: handleSpeechEnd,
+  });
 
   // Speech recognition hook
-  const { isListening, isSupported, toggleListening, stopListening } = useSpeechRecognition({
+  const { isListening, isSupported: recognitionSupported, startListening, stopListening, toggleListening } = useSpeechRecognition({
     onTranscript: (transcript) => {
-      setInput((prev) => prev + transcript);
+      setCurrentTranscript((prev) => prev + transcript);
       setInterimTranscript("");
     },
     onInterimTranscript: (transcript) => {
@@ -51,7 +81,9 @@ export function AegisChat() {
     },
   });
 
-  // Handle sending message
+  const isSupported = recognitionSupported && synthSupported;
+
+  // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
     const message = input;
@@ -59,22 +91,79 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Handle closing voice mode and auto-send
-  const handleCloseVoiceMode = useCallback(() => {
-    if (isListening) {
+  // When user stops listening in voice mode, send the message
+  const handleVoiceToggle = useCallback(() => {
+    if (voiceState === "listening") {
       stopListening();
+      if (currentTranscript.trim()) {
+        setVoiceState("processing");
+        setPendingVoiceMessage(currentTranscript.trim());
+      } else {
+        setVoiceState("idle");
+      }
+    } else if (voiceState === "idle") {
+      setCurrentTranscript("");
+      setInterimTranscript("");
+      startListening();
+      setVoiceState("listening");
     }
-    setVoiceModeOpen(false);
-    setInterimTranscript("");
+  }, [voiceState, stopListening, startListening, currentTranscript]);
+
+  // Send pending voice message
+  useEffect(() => {
+    if (pendingVoiceMessage && voiceState === "processing") {
+      sendMessage(pendingVoiceMessage);
+      setPendingVoiceMessage(null);
+    }
+  }, [pendingVoiceMessage, voiceState, sendMessage]);
+
+  // Watch for new assistant messages to speak
+  useEffect(() => {
+    if (!voiceModeOpen || voiceState !== "processing") return;
     
-    // Auto-send if there's text captured
-    if (input.trim() && !isStreaming) {
-      setTimeout(() => {
-        sendMessage(input);
-        setInput("");
-      }, 100);
-    }
-  }, [isListening, stopListening, input, isStreaming, sendMessage]);
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.role !== "assistant") return;
+    if (lastMessage.id === lastMessageIdRef.current) return;
+    if (isStreaming) return; // Wait for streaming to complete
+    
+    // New complete assistant message
+    lastMessageIdRef.current = lastMessage.id;
+    setAegisResponse(lastMessage.content);
+    setVoiceState("speaking");
+    
+    // Strip markdown for speech
+    const textToSpeak = lastMessage.content
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .replace(/#{1,6}\s/g, "")
+      .replace(/`[^`]*`/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[-•]/g, "");
+    
+    speak(textToSpeak);
+  }, [messages, isStreaming, voiceModeOpen, voiceState, speak]);
+
+  // Handle closing voice mode
+  const handleCloseVoiceMode = useCallback(() => {
+    stopListening();
+    stopSpeaking();
+    setVoiceModeOpen(false);
+    setVoiceState("idle");
+    setInterimTranscript("");
+    setCurrentTranscript("");
+    setAegisResponse("");
+    lastMessageIdRef.current = null;
+  }, [stopListening, stopSpeaking]);
+
+  // Handle opening voice mode
+  const handleOpenVoiceMode = useCallback(() => {
+    setVoiceModeOpen(true);
+    setVoiceState("idle");
+    setCurrentTranscript("");
+    setInterimTranscript("");
+    setAegisResponse("");
+    lastMessageIdRef.current = messages[messages.length - 1]?.id || null;
+  }, [messages]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -274,10 +363,10 @@ export function AegisChat() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setVoiceModeOpen(true)}
+            onClick={handleOpenVoiceMode}
             disabled={!isSupported}
             className="shrink-0 transition-all hover:text-primary"
-            title={!isSupported ? "Speech recognition not supported" : "Open voice mode"}
+            title={!isSupported ? "Speech not supported" : "Open voice mode"}
           >
             <Mic className="h-5 w-5" />
           </Button>
@@ -304,11 +393,17 @@ export function AegisChat() {
       {/* Fullscreen Voice Mode */}
       <VoiceMode
         isOpen={voiceModeOpen}
-        isListening={isListening}
+        voiceState={voiceState}
         isSupported={isSupported}
         interimTranscript={interimTranscript}
+        currentTranscript={currentTranscript}
+        aegisResponse={aegisResponse}
         onClose={handleCloseVoiceMode}
-        onToggleListening={toggleListening}
+        onToggleListening={handleVoiceToggle}
+        onStopSpeaking={() => {
+          stopSpeaking();
+          setVoiceState("idle");
+        }}
       />
     </div>
   );
