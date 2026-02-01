@@ -29,7 +29,7 @@ const App = () => (
                 <AppLayout />
               </ProtectedRoute>
             }>
-              <Route path="/" element={<Navigate to="/signal" replace />} />
+              <Route path="/" element={<Navigate to="/aegis" replace />} />
               <Route path="/signal" element={<SignalPage />} />
               <Route path="/messages" element={<MessagesPage />} />
               <Route path="/aegis" element={<AegisPage />} />
