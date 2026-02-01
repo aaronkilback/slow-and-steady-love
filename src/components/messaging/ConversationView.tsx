@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { LocationMap } from "./LocationMap";
 
 interface Message {
   id: string;
@@ -32,6 +34,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [isSending, setIsSending] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [conversationName, setConversationName] = useState("");
+  const [showLocationMap, setShowLocationMap] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -152,17 +155,33 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border bg-card/50 px-4 py-3">
-        <Button variant="ghost" size="icon" onClick={onBack}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div>
-          <h2 className="font-semibold text-foreground">{conversationName}</h2>
-          <p className="text-xs text-muted-foreground">Direct message</p>
+    <>
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" onClick={onBack}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h2 className="font-semibold text-foreground">{conversationName}</h2>
+              <p className="text-xs text-muted-foreground">Direct message</p>
+            </div>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <MoreVertical className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setShowLocationMap(true)}>
+                <MapPin className="h-4 w-4 mr-2" />
+                View Team Locations
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
 
       {/* Messages */}
       <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
@@ -256,6 +275,13 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
           </Button>
         </div>
       </div>
-    </div>
+      </div>
+
+      <LocationMap
+        conversationId={conversationId}
+        isOpen={showLocationMap}
+        onClose={() => setShowLocationMap(false)}
+      />
+    </>
   );
 }
