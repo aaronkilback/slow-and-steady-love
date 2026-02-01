@@ -59,6 +59,7 @@ export function MessagingHub() {
   const loadConversations = async () => {
     setIsLoading(true);
     
+    // First, get conversations with participants
     const { data: convData, error } = await supabase
       .from('conversations')
       .select(`
@@ -67,21 +68,40 @@ export function MessagingHub() {
         is_group,
         updated_at,
         conversation_participants (
-          user_id,
-          profiles:user_id (
-            full_name,
-            avatar_url
-          )
+          user_id
         )
       `)
       .order('updated_at', { ascending: false });
 
     if (!error && convData) {
+      // Get unique user IDs from all participants
+      const userIds = [...new Set(
+        convData.flatMap((conv: any) => 
+          conv.conversation_participants?.map((p: any) => p.user_id) || []
+        )
+      )];
+      
+      // Fetch profiles for all participants
+      let profilesMap: Record<string, { full_name: string; avatar_url: string | null }> = {};
+      if (userIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', userIds);
+        
+        if (profilesData) {
+          profilesMap = Object.fromEntries(
+            profilesData.map(p => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url }])
+          );
+        }
+      }
+
+      // Merge profiles into conversations
       const conversationsWithParticipants = convData.map((conv: any) => ({
         ...conv,
         participants: conv.conversation_participants?.map((p: any) => ({
           user_id: p.user_id,
-          profile: p.profiles,
+          profile: profilesMap[p.user_id] || { full_name: 'Unknown', avatar_url: null },
         })),
       }));
       setConversations(conversationsWithParticipants);
