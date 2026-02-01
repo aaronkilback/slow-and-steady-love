@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Radio, MessageCircle, Users, User } from "lucide-react";
+import { Radio, MessageCircle, Users, User, MessagesSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
@@ -8,6 +8,11 @@ const navItems = [
     path: "/signal",
     label: "Signal",
     icon: Radio,
+  },
+  {
+    path: "/messages",
+    label: "Messages",
+    icon: MessagesSquare,
   },
   {
     path: "/aegis",
