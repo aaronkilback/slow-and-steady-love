@@ -59,14 +59,22 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Handle closing voice mode
+  // Handle closing voice mode and auto-send
   const handleCloseVoiceMode = useCallback(() => {
     if (isListening) {
       stopListening();
     }
     setVoiceModeOpen(false);
     setInterimTranscript("");
-  }, [isListening, stopListening]);
+    
+    // Auto-send if there's text captured
+    if (input.trim() && !isStreaming) {
+      setTimeout(() => {
+        sendMessage(input);
+        setInput("");
+      }, 100);
+    }
+  }, [isListening, stopListening, input, isStreaming, sendMessage]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
