@@ -6,10 +6,11 @@ const corsHeaders = {
 };
 
 const EMERGENCY_KEYWORDS = [
-  "emergency", "help", "urgent", "danger", "threat", "attack", 
+  "help", "emergency", "urgent", "danger", "threat", "attack", 
   "breach", "compromised", "critical", "mayday", "sos", "hostile",
-  "injured", "casualty", "evacuate", "lockdown", "active shooter",
-  "intrusion", "perimeter", "code red", "backup needed"
+  "injured", "casualty", "evacuate", "lockdown", "shooter",
+  "intrusion", "perimeter", "backup", "medic", "fire", "bomb",
+  "trapped", "down", "ambush", "abort", "panic", "alarm"
 ];
 
 serve(async (req) => {
