@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
 
@@ -33,9 +34,15 @@ export function AegisChat() {
   } = useAegisChat();
 
   const [input, setInput] = useState("");
-  const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Speech recognition hook
+  const { isListening, isSupported, toggleListening } = useSpeechRecognition({
+    onTranscript: (transcript) => {
+      setInput((prev) => prev + transcript);
+    },
+  });
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -75,10 +82,6 @@ export function AegisChat() {
     const message = input;
     setInput("");
     await sendMessage(message);
-  };
-
-  const toggleVoice = () => {
-    setIsListening(!isListening);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -246,11 +249,13 @@ export function AegisChat() {
           <Button
             variant={isListening ? "default" : "ghost"}
             size="icon"
-            onClick={toggleVoice}
+            onClick={toggleListening}
+            disabled={!isSupported}
             className={cn(
               "shrink-0 transition-all",
               isListening && "bg-primary glow-cyan animate-pulse-glow"
             )}
+            title={!isSupported ? "Speech recognition not supported" : isListening ? "Stop listening" : "Start voice input"}
           >
             {isListening ? (
               <MicOff className="h-5 w-5" />
