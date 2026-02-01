@@ -13,6 +13,7 @@ import { LocationMap } from "./LocationMap";
 import { AttachmentPicker, AttachmentPreviewBar, type Attachment } from "./AttachmentPicker";
 import { MessageAttachments, type MessageAttachment } from "./MessageAttachments";
 import { AegisAlert, AegisMonitoringBadge } from "./AegisAlert";
+import { SOSButton } from "./SOSButton";
 
 interface Message {
   id: string;
@@ -281,6 +282,37 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     });
   };
 
+  const handleSOS = async () => {
+    if (!currentUserId) return;
+    
+    // Send SOS message
+    const sosMessage = "🚨 SOS EMERGENCY ALERT 🚨";
+    
+    const { error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: currentUserId,
+        content: sosMessage,
+      } as any);
+
+    if (!error) {
+      // Force immediate Aegis alert
+      setAegisAlert({
+        severity: "critical",
+        shouldIntervene: true,
+        suggestion: "Emergency SOS triggered! Aegis is alerting all available team members and dispatching assistance to your location. Stay calm and await backup.",
+        emergencyType: "sos_triggered"
+      });
+      
+      toast({
+        title: "🚨 SOS Sent",
+        description: "Emergency alert broadcasted to all team members.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <>
       <div className="flex flex-col h-full">
@@ -446,6 +478,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         {/* Input */}
         <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
           <div className="flex items-center gap-2">
+            <SOSButton onTrigger={handleSOS} disabled={isSending} />
             <AttachmentPicker
               attachments={attachments}
               onAdd={handleAddAttachments}
