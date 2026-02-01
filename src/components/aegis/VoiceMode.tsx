@@ -42,16 +42,16 @@ export function VoiceMode({
       case "speaking":
         return "Aegis is speaking...";
       default:
-        return "Tap the microphone to speak";
+        return "Starting...";
     }
   };
 
+  // Center button action - skip Aegis speech or do nothing (conversation is automatic)
   const handleCenterButtonClick = () => {
     if (isSpeaking) {
       onStopSpeaking();
-    } else {
-      onToggleListening();
     }
+    // In listening state, speech detection handles everything automatically
   };
 
   return (
@@ -168,7 +168,7 @@ export function VoiceMode({
               </>
             )}
 
-            {/* Center button */}
+            {/* Center orb - visual indicator, tap to skip speech */}
             <motion.button
               onClick={handleCenterButtonClick}
               disabled={!isSupported || isProcessing}
@@ -178,10 +178,11 @@ export function VoiceMode({
                 "border border-primary/30",
                 "shadow-[0_0_60px_-10px_hsl(var(--primary))]",
                 (isListening || isSpeaking) && "shadow-[0_0_80px_-5px_hsl(var(--primary))]",
-                (!isSupported || isProcessing) && "opacity-50 cursor-not-allowed"
+                (!isSupported || isProcessing) && "opacity-50 cursor-not-allowed",
+                isSpeaking && "cursor-pointer" // Only clickable when speaking (to skip)
               )}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={isSpeaking ? { scale: 1.05 } : {}}
+              whileTap={isSpeaking ? { scale: 0.95 } : {}}
               animate={(isListening || isSpeaking) ? { scale: [1, 1.02, 1] } : {}}
               transition={(isListening || isSpeaking) ? { duration: 1.5, repeat: Infinity } : {}}
             >
@@ -201,9 +202,9 @@ export function VoiceMode({
                 transition={{ duration: 1.5, repeat: Infinity }}
               >
                 {isSpeaking ? (
-                  <VolumeX className="h-12 w-12 text-primary" />
+                  <Volume2 className="h-12 w-12 text-primary" />
                 ) : isListening ? (
-                  <MicOff className="h-12 w-12 text-primary" />
+                  <Mic className="h-12 w-12 text-primary" />
                 ) : isProcessing ? (
                   <motion.div
                     animate={{ rotate: 360 }}
