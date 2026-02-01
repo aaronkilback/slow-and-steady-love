@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2, MapPin, MoreVertical, Shield } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -330,23 +329,9 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
               <p className="text-xs text-muted-foreground">Direct message</p>
             </div>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreVertical className="h-5 w-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setShowLocationMap(true)}>
-                <MapPin className="h-4 w-4 mr-2" />
-                View Team Locations
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsAegisActive(!isAegisActive)}>
-                <Shield className="h-4 w-4 mr-2" />
-                {isAegisActive ? "Disable" : "Enable"} Aegis Monitoring
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="ghost" size="icon" onClick={() => setShowLocationMap(true)}>
+            <MapPin className="h-5 w-5" />
+          </Button>
         </div>
 
         {/* Aegis Alert */}
@@ -355,7 +340,6 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             <AegisAlert
               severity={aegisAlert.severity}
               suggestion={aegisAlert.suggestion || ""}
-              emergencyType={aegisAlert.emergencyType}
               onDismiss={() => setAegisAlert(null)}
               onAcceptHelp={() => {
                 toast({
@@ -480,9 +464,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
           <div className="flex items-center gap-2">
             <SOSButton onTrigger={handleSOS} disabled={isSending} />
             <AttachmentPicker
-              attachments={attachments}
               onAdd={handleAddAttachments}
-              onRemove={handleRemoveAttachment}
               disabled={isSending}
             />
             <Input
