@@ -8,8 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { useOpenAITTS } from "@/hooks/useOpenAITTS";
+import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -41,62 +40,49 @@ export function AegisChat() {
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentTranscript, setCurrentTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const lastMessageIdRef = useRef<string | null>(null);
-  const voiceModeOpenRef = useRef(voiceModeOpen);
-  
-  useEffect(() => { voiceModeOpenRef.current = voiceModeOpen; }, [voiceModeOpen]);
 
-  // Browser speech recognition - same as main Fortress platform
-  const { 
-    isListening, 
-    isSupported, 
-    startListening, 
-    stopListening 
-  } = useSpeechRecognition({
-    onTranscript: (transcript) => {
-      setCurrentTranscript(prev => prev + transcript);
-      setInterimTranscript("");
+  // OpenAI Realtime API for voice
+  const {
+    status: realtimeStatus,
+    isSupported,
+    connect: connectRealtime,
+    disconnect: disconnectRealtime,
+  } = useOpenAIRealtime({
+    agentContext: "You are in voice mode, assisting with security operations.",
+    onTranscript: (text) => {
+      setCurrentTranscript(text);
     },
-    onInterimTranscript: (transcript) => {
-      setInterimTranscript(transcript);
-    },
-    continuous: true,
-  });
-
-  // Sync listening state
-  useEffect(() => {
-    if (isListening && voiceState !== "listening") {
-      setVoiceState("listening");
-    }
-  }, [isListening, voiceState]);
-
-  // Resume listening after Aegis finishes speaking
-  const handleSpeechEnd = useCallback(() => {
-    if (voiceModeOpenRef.current) {
-      setVoiceState("idle");
-      setAegisResponse("");
-      setCurrentTranscript("");
-      setInterimTranscript("");
-      // Auto-restart listening after response
+    onAgentResponseComplete: (text) => {
+      setAegisResponse(text);
+      // Briefly show response then clear for next turn
       setTimeout(() => {
-        if (voiceModeOpenRef.current) {
-          startListening();
+        setAegisResponse("");
+        setCurrentTranscript("");
+      }, 3000);
+    },
+    onError: (error) => {
+      console.error("[Voice] Error:", error);
+    },
+    onStatusChange: (status) => {
+      // Map realtime status to voice state
+      switch (status) {
+        case "idle":
+          setVoiceState("idle");
+          break;
+        case "connecting":
+          setVoiceState("processing");
+          break;
+        case "connected":
+        case "listening":
           setVoiceState("listening");
-        }
-      }, 500);
-    }
-  }, [startListening]);
-
-  // OpenAI TTS with onyx voice
-  const { speak, stop: stopSpeaking } = useOpenAITTS({
-    onEnd: handleSpeechEnd,
-    onError: (err) => {
-      console.error("TTS error:", err);
-      setVoiceState("idle");
+          break;
+        case "speaking":
+          setVoiceState("speaking");
+          break;
+      }
     },
   });
 
@@ -108,87 +94,30 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Voice toggle - tap to stop listening and send, tap again to start
-  const handleVoiceToggle = useCallback(() => {
-    if (voiceState === "listening") {
-      // User tapped while listening - stop and send what we have
-      stopListening();
-      const transcript = currentTranscript.trim();
-      if (transcript) {
-        setVoiceState("processing");
-        sendMessage(transcript);
-        setCurrentTranscript("");
-        setInterimTranscript("");
-      } else {
-        setVoiceState("idle");
-      }
-    } else if (voiceState === "idle") {
-      // Start listening
-      setCurrentTranscript("");
-      setInterimTranscript("");
-      startListening();
-      setVoiceState("listening");
-    }
-  }, [voiceState, stopListening, startListening, currentTranscript, sendMessage]);
-
-  // Watch for new assistant messages to speak
-  useEffect(() => {
-    if (!voiceModeOpen) return;
-    // Only trigger TTS when we're actively waiting for a response (processing state)
-    if (voiceState !== "processing") return;
-    
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || lastMessage.role !== "assistant") return;
-    if (isStreaming) return; // Wait for streaming to complete
-    
-    // Check if this is a new message we haven't spoken yet
-    if (lastMessage.id === lastMessageIdRef.current) return;
-    
-    console.log("[Voice] New assistant message detected, triggering TTS");
-    
-    // New complete assistant message
-    lastMessageIdRef.current = lastMessage.id;
-    setAegisResponse(lastMessage.content);
-    setVoiceState("speaking");
-    
-    // Strip markdown for speech
-    const textToSpeak = lastMessage.content
-      .replace(/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/#{1,6}\s/g, "")
-      .replace(/`[^`]*`/g, "")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/[-•]/g, "");
-    
-    console.log("[Voice] Speaking:", textToSpeak.substring(0, 100) + "...");
-    speak(textToSpeak);
-  }, [messages, isStreaming, voiceModeOpen, voiceState, speak]);
-
   // Handle closing voice mode
   const handleCloseVoiceMode = useCallback(() => {
-    stopListening();
-    stopSpeaking();
+    disconnectRealtime();
     setVoiceModeOpen(false);
     setVoiceState("idle");
     setCurrentTranscript("");
-    setInterimTranscript("");
     setAegisResponse("");
-    lastMessageIdRef.current = null;
-  }, [stopListening, stopSpeaking]);
+  }, [disconnectRealtime]);
 
-  // Handle opening voice mode - automatically start listening
+  // Handle opening voice mode - connect to realtime API
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
-    setInterimTranscript("");
     setAegisResponse("");
-    lastMessageIdRef.current = messages[messages.length - 1]?.id || null;
-    // Start listening immediately when voice mode opens
-    setTimeout(() => {
-      startListening();
-      setVoiceState("listening");
-    }, 300);
-  }, [messages, startListening]);
+    // Connect to OpenAI Realtime API
+    connectRealtime();
+  }, [connectRealtime]);
+
+  // Handle stopping speech (not applicable with realtime API in same way)
+  const handleStopSpeaking = useCallback(() => {
+    // With realtime API, we can't easily interrupt mid-speech
+    // Just update local state
+    setVoiceState("listening");
+  }, []);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -424,11 +353,8 @@ export function AegisChat() {
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
         onClose={handleCloseVoiceMode}
-        onToggleListening={handleVoiceToggle}
-        onStopSpeaking={() => {
-          stopSpeaking();
-          setVoiceState("idle");
-        }}
+        onToggleListening={handleStopSpeaking}
+        onStopSpeaking={handleStopSpeaking}
       />
     </div>
   );
