@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { User, Session } from "@supabase/supabase-js";
 
 interface AuthContextType {
@@ -27,8 +27,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener first
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    // Set up auth state listener first (using Fortress client)
+    const { data: { subscription } } = fortressClient.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     );
 
     // Then check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    fortressClient.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
@@ -74,7 +74,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">Connecting to Fortress...</p>
         </div>
       </div>
     );

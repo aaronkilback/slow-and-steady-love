@@ -1,16 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint, BellOff, Loader2 } from "lucide-react";
+import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 import { MuteSettings } from "./MuteSettings";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 interface SettingItemProps {
   icon: React.ElementType;
@@ -44,50 +45,33 @@ function SettingItem({ icon: Icon, label, description, action, onClick }: Settin
   );
 }
 
-interface Profile {
-  full_name: string;
-  avatar_url: string | null;
-}
-
 export function ProfileSettings() {
   const [pushNotifications, setPushNotifications] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [userEmail, setUserEmail] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  // Get user metadata from Fortress auth
+  const userEmail = user?.email || "";
+  const displayName = user?.user_metadata?.full_name || 
+                      user?.user_metadata?.name || 
+                      user?.email?.split("@")[0] || 
+                      "Operator";
+  const avatarUrl = user?.user_metadata?.avatar_url || null;
 
-  const loadProfile = async () => {
-    setIsLoading(true);
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      setUserEmail(user.email || "");
-      
-      const { data } = await supabase
-        .from('profiles')
-        .select('full_name, avatar_url')
-        .eq('id', user.id)
-        .single();
-      
-      if (data) {
-        setProfile(data);
-      }
-    }
-    
-    setIsLoading(false);
-  };
+  const initials = displayName
+    .split(" ")
+    .map((n: string) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
-    const { error } = await supabase.auth.signOut();
+    const { error } = await fortressClient.auth.signOut();
     
     if (error) {
       toast({
@@ -101,22 +85,6 @@ export function ProfileSettings() {
     }
   };
 
-  const displayName = profile?.full_name || "Operator";
-  const initials = displayName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
     <ScrollArea className="flex-1 px-4 py-4">
       <div className="space-y-6 pb-4">
@@ -124,14 +92,14 @@ export function ProfileSettings() {
         <Card className="p-4 border-border bg-card">
           <div className="flex items-center gap-4">
             <Avatar className="h-16 w-16 border-2 border-primary">
-              <AvatarImage src={profile?.avatar_url || undefined} />
+              <AvatarImage src={avatarUrl || undefined} />
               <AvatarFallback className="bg-primary/20 text-primary text-lg">
                 {initials}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-foreground">{displayName}</h2>
-              <p className="text-sm text-primary">Operator</p>
+              <p className="text-sm text-primary">Fortress Operator</p>
               <p className="text-xs text-muted-foreground">{userEmail}</p>
             </div>
           </div>
