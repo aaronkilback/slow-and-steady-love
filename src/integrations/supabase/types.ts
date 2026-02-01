@@ -156,7 +156,9 @@ export type Database = {
           content: string
           conversation_id: string
           created_at: string
+          encrypted: boolean
           id: string
+          nonce: string | null
           sender_id: string
         }
         Insert: {
@@ -164,7 +166,9 @@ export type Database = {
           content: string
           conversation_id: string
           created_at?: string
+          encrypted?: boolean
           id?: string
+          nonce?: string | null
           sender_id: string
         }
         Update: {
@@ -172,7 +176,9 @@ export type Database = {
           content?: string
           conversation_id?: string
           created_at?: string
+          encrypted?: boolean
           id?: string
+          nonce?: string | null
           sender_id?: string
         }
         Relationships: [
@@ -224,6 +230,8 @@ export type Database = {
           created_at: string
           full_name: string
           id: string
+          key_salt: string | null
+          public_key: string | null
           updated_at: string
         }
         Insert: {
@@ -231,6 +239,8 @@ export type Database = {
           created_at?: string
           full_name: string
           id: string
+          key_salt?: string | null
+          public_key?: string | null
           updated_at?: string
         }
         Update: {
@@ -238,6 +248,8 @@ export type Database = {
           created_at?: string
           full_name?: string
           id?: string
+          key_salt?: string | null
+          public_key?: string | null
           updated_at?: string
         }
         Relationships: []
