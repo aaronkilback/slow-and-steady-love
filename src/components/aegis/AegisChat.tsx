@@ -74,7 +74,15 @@ export function AegisChat() {
     },
   });
 
-  // Speech recognition hook
+  // Handle automatic speech end detection (user stopped talking)
+  const handleAutoSpeechEnd = useCallback(() => {
+    if (voiceModeOpen && voiceState === "listening") {
+      // Automatically send when user stops speaking
+      stopListeningRef.current?.();
+    }
+  }, [voiceModeOpen, voiceState]);
+
+  // Speech recognition hook with auto-detection
   const { isListening, isSupported: recognitionSupported, startListening, stopListening, toggleListening } = useSpeechRecognition({
     onTranscript: (transcript) => {
       setCurrentTranscript((prev) => prev + transcript);
@@ -83,7 +91,25 @@ export function AegisChat() {
     onInterimTranscript: (transcript) => {
       setInterimTranscript(transcript);
     },
+    onSpeechEnd: handleAutoSpeechEnd,
+    silenceTimeout: 1500, // 1.5 seconds of silence triggers send
   });
+
+  // Store stopListening in a ref for use in callbacks
+  const stopListeningRef = useRef<() => void>();
+  stopListeningRef.current = () => {
+    stopListening();
+    if (currentTranscript.trim()) {
+      setVoiceState("processing");
+      setPendingVoiceMessage(currentTranscript.trim());
+    } else {
+      // No speech captured, go back to listening
+      setCurrentTranscript("");
+      setInterimTranscript("");
+      setTimeout(() => startListening(), 300);
+      setVoiceState("listening");
+    }
+  };
 
   // TTS is always supported (server-side), only check speech recognition
   const isSupported = recognitionSupported;
@@ -96,17 +122,23 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // When user stops listening in voice mode, send the message
+  // Voice mode uses automatic speech detection - this is now just for manual interruption
   const handleVoiceToggle = useCallback(() => {
     if (voiceState === "listening") {
+      // User manually tapped while listening - send what we have
       stopListening();
       if (currentTranscript.trim()) {
         setVoiceState("processing");
         setPendingVoiceMessage(currentTranscript.trim());
       } else {
-        setVoiceState("idle");
+        // Nothing captured, resume listening
+        setCurrentTranscript("");
+        setInterimTranscript("");
+        setTimeout(() => startListening(), 300);
+        setVoiceState("listening");
       }
     } else if (voiceState === "idle") {
+      // Start listening
       setCurrentTranscript("");
       setInterimTranscript("");
       startListening();
@@ -160,15 +192,19 @@ export function AegisChat() {
     lastMessageIdRef.current = null;
   }, [stopListening, stopSpeaking]);
 
-  // Handle opening voice mode
+  // Handle opening voice mode - automatically start listening (ChatGPT-style)
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
-    setVoiceState("idle");
     setCurrentTranscript("");
     setInterimTranscript("");
     setAegisResponse("");
     lastMessageIdRef.current = messages[messages.length - 1]?.id || null;
-  }, [messages]);
+    // Start listening immediately when voice mode opens
+    setTimeout(() => {
+      startListening();
+      setVoiceState("listening");
+    }, 300);
+  }, [messages, startListening]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
