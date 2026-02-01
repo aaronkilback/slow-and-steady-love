@@ -131,17 +131,30 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     if (data) {
       const participantIds = (data.conversation_participants as any)?.map((p: any) => p.user_id) || [];
       
-      // Fetch profiles for participants from Fortress
+      // Fetch profiles for participants from Fortress (try 'name' first, fallback to 'full_name')
       let profilesMap: Record<string, { full_name: string; public_key: string | null }> = {};
       if (participantIds.length > 0) {
-        const { data: profilesData } = await fortressClient
+        // Try 'name' column first (Fortress schema)
+        let profilesData = null;
+        const { data: nameData, error: nameError } = await fortressClient
           .from('profiles')
-          .select('id, full_name, public_key')
+          .select('id, name, public_key')
           .in('id', participantIds);
+        
+        if (!nameError && nameData) {
+          profilesData = nameData.map((p: any) => ({ ...p, full_name: p.name }));
+        } else {
+          // Fallback to 'full_name' column
+          const { data: fullNameData } = await fortressClient
+            .from('profiles')
+            .select('id, full_name, public_key')
+            .in('id', participantIds);
+          profilesData = fullNameData;
+        }
         
         if (profilesData) {
           profilesMap = Object.fromEntries(
-            profilesData.map(p => [p.id, { full_name: p.full_name, public_key: p.public_key }])
+            profilesData.map((p: any) => [p.id, { full_name: p.full_name || p.name, public_key: p.public_key }])
           );
         }
       }
@@ -182,17 +195,28 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       // Get unique sender IDs
       const senderIds = [...new Set(data.map((m: any) => m.sender_id))];
       
-      // Fetch profiles from Fortress
+      // Fetch profiles from Fortress (try 'name' first, fallback to 'full_name')
       let profilesMap: Record<string, { full_name: string; avatar_url: string | null; public_key: string | null }> = {};
       if (senderIds.length > 0) {
-        const { data: profilesData } = await fortressClient
+        let profilesData = null;
+        const { data: nameData, error: nameError } = await fortressClient
           .from('profiles')
-          .select('id, full_name, avatar_url, public_key')
+          .select('id, name, avatar_url, public_key')
           .in('id', senderIds);
+        
+        if (!nameError && nameData) {
+          profilesData = nameData.map((p: any) => ({ ...p, full_name: p.name }));
+        } else {
+          const { data: fullNameData } = await fortressClient
+            .from('profiles')
+            .select('id, full_name, avatar_url, public_key')
+            .in('id', senderIds);
+          profilesData = fullNameData;
+        }
         
         if (profilesData) {
           profilesMap = Object.fromEntries(
-            profilesData.map(p => [p.id, { full_name: p.full_name, avatar_url: p.avatar_url, public_key: p.public_key }])
+            profilesData.map((p: any) => [p.id, { full_name: p.full_name || p.name, avatar_url: p.avatar_url, public_key: p.public_key }])
           );
         }
       }
