@@ -103,22 +103,33 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
     };
   }, [conversationId]);
 
-  // Scroll to bottom when messages load or change
+  // Scroll to bottom helper
+  const scrollToBottom = useCallback(() => {
+    if (!scrollRef.current) return;
+    const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    const target = scrollContainer || scrollRef.current;
+    target.scrollTop = target.scrollHeight;
+  }, []);
+
+  // Scroll to bottom when messages finish loading
   useEffect(() => {
-    if (scrollRef.current && !isLoading) {
-      // Use setTimeout to ensure DOM has updated
-      setTimeout(() => {
-        if (scrollRef.current) {
-          const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
-          if (scrollContainer) {
-            scrollContainer.scrollTop = scrollContainer.scrollHeight;
-          } else {
-            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-          }
-        }
-      }, 50);
+    if (!isLoading && messages.length > 0) {
+      // Multiple attempts to ensure content is rendered
+      requestAnimationFrame(() => {
+        scrollToBottom();
+        // Fallback with delay for slower renders
+        setTimeout(scrollToBottom, 100);
+        setTimeout(scrollToBottom, 300);
+      });
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, scrollToBottom]);
+
+  // Also scroll when switching conversations
+  useEffect(() => {
+    if (conversationId) {
+      setTimeout(scrollToBottom, 400);
+    }
+  }, [conversationId, scrollToBottom]);
 
   const getCurrentUser = async () => {
     // Get user from Fortress auth
