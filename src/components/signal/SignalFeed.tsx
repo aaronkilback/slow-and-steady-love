@@ -1,80 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, Shield, Eye, Radio, Clock, MapPin, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle, Shield, Eye, Radio, Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useSignals, Signal as SignalType } from "@/hooks/useFortressData";
+import { fortressClient } from "@/lib/fortress-client";
 
 type Severity = "critical" | "high" | "medium" | "low";
-
-interface SignalItem {
-  id: string;
-  title: string;
-  description: string;
-  severity: Severity;
-  category: string;
-  source: string;
-  timestamp: Date;
-  location?: string;
-  details?: string;
-}
-
-// Mock data - will be replaced with real data from database
-const mockSignals: SignalItem[] = [
-  {
-    id: "1",
-    title: "Unauthorized Access Attempt",
-    description: "Multiple failed login attempts detected from suspicious IP range",
-    severity: "critical",
-    category: "Intrusion Detection",
-    source: "Sentinel Agent",
-    timestamp: new Date(Date.now() - 1000 * 60 * 2),
-    location: "Gateway Server",
-    details: "15 failed attempts from IP 192.168.1.x range within 30 seconds. Pattern suggests automated brute force attack. Source IPs have been temporarily blocked.",
-  },
-  {
-    id: "2",
-    title: "Threat Intelligence Update",
-    description: "New ransomware variant identified affecting financial sector",
-    severity: "high",
-    category: "Intelligence",
-    source: "OSINT Agent",
-    timestamp: new Date(Date.now() - 1000 * 60 * 15),
-    details: "IOCs have been updated in the threat database. All perimeter systems scanning for indicators.",
-  },
-  {
-    id: "3",
-    title: "Anomalous Network Traffic",
-    description: "Unusual outbound data transfer pattern detected",
-    severity: "medium",
-    category: "Network Monitor",
-    source: "Monitor Agent",
-    timestamp: new Date(Date.now() - 1000 * 60 * 45),
-    location: "Workstation WS-042",
-    details: "2.3GB outbound transfer to external IP. Under investigation - may be legitimate backup activity.",
-  },
-  {
-    id: "4",
-    title: "System Health Check Complete",
-    description: "All primary security systems operating normally",
-    severity: "low",
-    category: "Status",
-    source: "Aegis",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60),
-    details: "Daily automated health check completed. All 47 monitored endpoints responding. No anomalies detected.",
-  },
-  {
-    id: "5",
-    title: "Firewall Rule Update",
-    description: "New egress rules deployed successfully",
-    severity: "low",
-    category: "Configuration",
-    source: "Sentinel Agent",
-    timestamp: new Date(Date.now() - 1000 * 60 * 120),
-    details: "12 new blocking rules deployed based on latest threat intelligence. No service disruption reported.",
-  },
-];
 
 const severityConfig: Record<Severity, { color: string; bgColor: string; icon: React.ElementType; glowClass: string }> = {
   critical: { color: "text-critical", bgColor: "bg-critical/10", icon: AlertTriangle, glowClass: "glow-critical" },
@@ -93,9 +28,10 @@ function formatTimeAgo(date: Date): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function SignalCard({ signal }: { signal: SignalItem }) {
+function SignalCard({ signal }: { signal: SignalType }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const config = severityConfig[signal.severity];
+  const severity = (signal.severity || "low") as Severity;
+  const config = severityConfig[severity];
   const Icon = config.icon;
 
   return (
@@ -111,7 +47,7 @@ function SignalCard({ signal }: { signal: SignalItem }) {
           config.bgColor,
           isExpanded && config.glowClass
         )}
-        style={{ borderLeftColor: `hsl(var(--${signal.severity}))` }}
+        style={{ borderLeftColor: `hsl(var(--${severity}))` }}
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="p-4">
@@ -122,7 +58,7 @@ function SignalCard({ signal }: { signal: SignalItem }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <Badge variant="outline" className={cn("text-xs", config.color)}>
-                  {signal.severity.toUpperCase()}
+                  {severity.toUpperCase()}
                 </Badge>
                 <span className="text-xs text-muted-foreground">{signal.category}</span>
               </div>
@@ -135,7 +71,7 @@ function SignalCard({ signal }: { signal: SignalItem }) {
               <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  {formatTimeAgo(signal.timestamp)}
+                  {formatTimeAgo(new Date(signal.created_at))}
                 </span>
                 {signal.location && (
                   <span className="flex items-center gap-1">
@@ -175,17 +111,87 @@ function SignalCard({ signal }: { signal: SignalItem }) {
 }
 
 export function SignalFeed() {
-  const [signals] = useState<SignalItem[]>(mockSignals);
+  const { data: signals = [], isLoading, refetch, isRefetching } = useSignals();
+  const [localSignals, setLocalSignals] = useState<SignalType[]>([]);
+
+  // Update local signals when data changes
+  useEffect(() => {
+    if (signals.length > 0) {
+      setLocalSignals(signals);
+    }
+  }, [signals]);
+
+  // Subscribe to realtime updates
+  useEffect(() => {
+    const channel = fortressClient
+      .channel("signals-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "signals",
+        },
+        (payload) => {
+          setLocalSignals((prev) => [payload.new as SignalType, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      fortressClient.removeChannel(channel);
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Loading signals...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <ScrollArea className="flex-1 px-4 py-4">
-      <div className="space-y-3 pb-4">
-        <AnimatePresence>
-          {signals.map((signal) => (
-            <SignalCard key={signal.id} signal={signal} />
-          ))}
-        </AnimatePresence>
+    <div className="flex-1 flex flex-col">
+      {/* Refresh header */}
+      <div className="px-4 py-2 flex items-center justify-between border-b border-border">
+        <span className="text-xs text-muted-foreground">
+          {localSignals.length} signals
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => refetch()}
+          disabled={isRefetching}
+          className="h-8 px-2"
+        >
+          <RefreshCw className={cn("h-4 w-4 mr-1", isRefetching && "animate-spin")} />
+          Refresh
+        </Button>
       </div>
-    </ScrollArea>
+
+      <ScrollArea className="flex-1 px-4 py-4">
+        <div className="space-y-3 pb-4">
+          {localSignals.length === 0 ? (
+            <div className="text-center py-12">
+              <Radio className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+              <p className="text-muted-foreground">No signals detected</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                All systems operating normally
+              </p>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {localSignals.map((signal) => (
+                <SignalCard key={signal.id} signal={signal} />
+              ))}
+            </AnimatePresence>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
