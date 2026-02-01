@@ -17,7 +17,7 @@ interface AegisConversation {
 
 interface OperatorProfile {
   id: string;
-  full_name: string | null;
+  name: string | null;
   avatar_url?: string | null;
 }
 
@@ -73,23 +73,42 @@ export function useAegisChat() {
 
     let cancelled = false;
     (async () => {
-      const { data, error } = await fortressClient
+      // Try different column names as Fortress may use 'name' or 'full_name'
+      let profileData: { id: string; name?: string | null; full_name?: string | null; avatar_url?: string | null } | null = null;
+      
+      // First try 'name' column (Fortress schema)
+      const { data: nameData, error: nameError } = await fortressClient
         .from("profiles")
-        .select("id, full_name, avatar_url")
+        .select("id, name, avatar_url")
         .eq("id", userId)
         .maybeSingle();
 
       if (cancelled) return;
-      if (error) {
-        console.warn("Failed to load operator profile:", error.message);
-        setOperator({ id: userId, full_name: null });
-        return;
+      
+      if (!nameError && nameData) {
+        profileData = nameData;
+      } else {
+        // Fallback to 'full_name' column
+        const { data: fullNameData, error: fullNameError } = await fortressClient
+          .from("profiles")
+          .select("id, full_name, avatar_url")
+          .eq("id", userId)
+          .maybeSingle();
+        
+        if (cancelled) return;
+        if (!fullNameError && fullNameData) {
+          profileData = { ...fullNameData, name: fullNameData.full_name };
+        }
       }
 
-      if (data) {
-        setOperator({ id: data.id, full_name: data.full_name ?? null, avatar_url: data.avatar_url ?? null });
+      if (profileData) {
+        setOperator({ 
+          id: profileData.id, 
+          name: profileData.name ?? profileData.full_name ?? null, 
+          avatar_url: profileData.avatar_url ?? null 
+        });
       } else {
-        setOperator({ id: userId, full_name: null });
+        setOperator({ id: userId, name: null });
       }
     })();
 
@@ -294,7 +313,7 @@ export function useAegisChat() {
     }
 
     // Prepare messages for API (ALWAYS include operator identity + full chat history)
-    const operatorName = operator?.full_name?.trim() || null;
+    const operatorName = operator?.name?.trim() || null;
     const operatorContext = operatorName
       ? `Current operator: ${operatorName} (id: ${operator?.id ?? userId}).`
       : `Current operator id: ${operator?.id ?? userId}. (Name not available from profile.)`;
@@ -318,9 +337,9 @@ export function useAegisChat() {
           messages: apiMessages,
           conversationId: convId,
           operator: operator
-            ? { id: operator.id, full_name: operator.full_name ?? null }
+            ? { id: operator.id, name: operator.name ?? null }
             : userId
-              ? { id: userId, full_name: null }
+              ? { id: userId, name: null }
               : null,
         }),
       });
