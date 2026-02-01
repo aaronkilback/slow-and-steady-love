@@ -11,12 +11,21 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const body = await req.json();
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const operator = body?.operator ?? null;
+    const conversationId = body?.conversationId ?? null;
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
+
+    const operatorLine = operator?.id
+      ? `\n\nOperator context:\n- id: ${operator.id}${operator?.full_name ? `\n- name: ${operator.full_name}` : ""}${conversationId ? `\n- conversation_id: ${conversationId}` : ""}\n\nYou MUST use the operator name when available; if not available, ask the operator for their preferred name once.`
+      : conversationId
+        ? `\n\nConversation context:\n- conversation_id: ${conversationId}`
+        : "";
 
     const systemPrompt = `You are Aegis, the lead AI security agent for Silent Shield Security Operations Center. You are:
 - Professional, tactical, and concise
@@ -38,7 +47,7 @@ Communication style:
 - Provide actionable intelligence and recommendations
 - Use markdown formatting for clarity (headers, bullets, bold for emphasis)
 
-Remember: You are the trusted AI partner for security professionals. Every interaction matters for mission success.`;
+Remember: You are the trusted AI partner for security professionals. Every interaction matters for mission success.${operatorLine}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -50,10 +59,13 @@ Remember: You are the trusted AI partner for security professionals. Every inter
         model: "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: systemPrompt },
-          ...messages.map((m: { role: string; content: string }) => ({
-            role: m.role,
-            content: m.content
-          })),
+          ...messages.map((m: { role: string; content: string }) => {
+            const role = m?.role === "system" || m?.role === "assistant" || m?.role === "user" ? m.role : "user";
+            return {
+              role,
+              content: typeof m?.content === "string" ? m.content : "",
+            };
+          }),
         ],
         stream: true,
       }),

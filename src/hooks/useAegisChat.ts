@@ -15,8 +15,19 @@ interface AegisConversation {
   updated_at: string;
 }
 
+interface OperatorProfile {
+  id: string;
+  full_name: string | null;
+  avatar_url?: string | null;
+}
+
 // Use the local Supabase edge function for AI chat
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
+
+// Fortress platform table names can vary between deployments.
+// We try the known variants in order to ensure we always use REAL platform data.
+const FORTRESS_CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
+const FORTRESS_MESSAGE_TABLES = ["agent_messages", "aegis_messages"] as const;
 
 export function useAegisChat() {
   const [conversations, setConversations] = useState<AegisConversation[]>([]);
@@ -25,6 +36,7 @@ export function useAegisChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [operator, setOperator] = useState<OperatorProfile | null>(null);
   const { toast } = useToast();
 
   // Get current user from Fortress
@@ -52,6 +64,40 @@ export function useAegisChat() {
     }
   }, [userId]);
 
+  // Load operator profile (real, from Fortress)
+  useEffect(() => {
+    if (!userId) {
+      setOperator(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await fortressClient
+        .from("profiles")
+        .select("id, full_name, avatar_url")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        console.warn("Failed to load operator profile:", error.message);
+        setOperator({ id: userId, full_name: null });
+        return;
+      }
+
+      if (data) {
+        setOperator({ id: data.id, full_name: data.full_name ?? null, avatar_url: data.avatar_url ?? null });
+      } else {
+        setOperator({ id: userId, full_name: null });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   // Load messages when conversation changes
   useEffect(() => {
     if (currentConversationId) {
@@ -63,45 +109,62 @@ export function useAegisChat() {
 
   const loadConversations = async () => {
     if (!userId) return;
-    
-    // Load from Fortress agent_conversations table (the correct table name)
-    const { data, error } = await fortressClient
-      .from('agent_conversations')
-      .select('id, title, updated_at')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
 
-    if (!error && data) {
-      setConversations(data);
-      // Auto-select most recent if none selected
-      if (data.length > 0 && !currentConversationId) {
-        setCurrentConversationId(data[0].id);
+    for (const table of FORTRESS_CONVERSATION_TABLES) {
+      const { data, error } = await fortressClient
+        .from(table)
+        .select("id, title, updated_at")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false });
+
+      if (!error && data) {
+        setConversations(data);
+        if (data.length > 0 && !currentConversationId) {
+          setCurrentConversationId(data[0].id);
+        }
+        return;
       }
-    } else if (error) {
-      console.log("Conversations table may not exist in Fortress:", error.message);
-      // Conversations will be stored locally in state only
-      setConversations([]);
+
+      // If table missing, try next name; otherwise stop.
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") {
+        console.warn("Failed to load conversations:", error.message);
+        break;
+      }
     }
+
+    setConversations([]);
   };
 
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
-    
-    const { data, error } = await fortressClient
-      .from('agent_messages')
-      .select('id, role, content, created_at')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
 
-    if (!error && data) {
-      setMessages(data.map(m => ({
-        ...m,
-        role: m.role as "user" | "assistant"
-      })));
-    } else {
-      // Messages table may not exist
-      setMessages([]);
+    for (const table of FORTRESS_MESSAGE_TABLES) {
+      const { data, error } = await fortressClient
+        .from(table)
+        .select("id, role, content, created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        setMessages(
+          data.map((m: any) => ({
+            ...m,
+            role: m.role as "user" | "assistant",
+          }))
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") {
+        console.warn("Failed to load messages:", error.message);
+        break;
+      }
     }
+
+    setMessages([]);
     setIsLoading(false);
   };
 
@@ -115,68 +178,71 @@ export function useAegisChat() {
       return null;
     }
 
-    // Create in Fortress agent_conversations table
-    const { data, error } = await fortressClient
-      .from('agent_conversations')
-      .insert({ user_id: userId })
-      .select('id')
-      .single();
+    for (const table of FORTRESS_CONVERSATION_TABLES) {
+      const { data, error } = await fortressClient
+        .from(table)
+        .insert({ user_id: userId })
+        .select("id")
+        .single();
 
-    if (error) {
-      // If table doesn't exist, create a local-only conversation
-      console.log("Could not save conversation to Fortress:", error.message);
-      const localId = `local-${Date.now()}`;
-      setCurrentConversationId(localId);
-      return localId;
+      if (!error && data?.id) {
+        setCurrentConversationId(data.id);
+        loadConversations();
+        return data.id;
+      }
+
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") {
+        console.warn("Could not create conversation:", error.message);
+        break;
+      }
     }
 
-    setCurrentConversationId(data.id);
-    loadConversations();
-    return data.id;
+    toast({
+      variant: "destructive",
+      title: "Chat unavailable",
+      description: "Unable to create a conversation on the platform. Please try again later.",
+    });
+    return null;
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    // Skip saving for local-only conversations
-    if (conversationId.startsWith('local-')) {
-      return {
-        id: `msg-${Date.now()}`,
-        role,
-        content,
-        created_at: new Date().toISOString(),
-      };
+    for (const table of FORTRESS_MESSAGE_TABLES) {
+      const { data, error } = await fortressClient
+        .from(table)
+        .insert({
+          conversation_id: conversationId,
+          role,
+          content,
+        })
+        .select("id, role, content, created_at")
+        .single();
+
+      if (!error && data) return data;
+
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") {
+        throw new Error(error.message);
+      }
     }
 
-    const { data, error } = await fortressClient
-      .from('agent_messages')
-      .insert({
-        conversation_id: conversationId,
-        role,
-        content,
-      })
-      .select('id, role, content, created_at')
-      .single();
-
-    if (error) {
-      console.log("Could not save message to Fortress:", error.message);
-      return {
-        id: `msg-${Date.now()}`,
-        role,
-        content,
-        created_at: new Date().toISOString(),
-      };
-    }
-
-    return data;
+    throw new Error("Platform messages table not available");
   };
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
-    if (conversationId.startsWith('local-')) return;
-    
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await fortressClient
-      .from('agent_conversations')
-      .update({ title })
-      .eq('id', conversationId);
+
+    for (const table of FORTRESS_CONVERSATION_TABLES) {
+      const { error } = await fortressClient
+        .from(table)
+        .update({ title })
+        .eq("id", conversationId);
+
+      if (!error) break;
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") break;
+    }
+
     loadConversations();
   };
 
@@ -201,10 +267,25 @@ export function useAegisChat() {
     setMessages(prev => [...prev, userMessage]);
     setIsStreaming(true);
 
-    // Save user message
-    const savedUserMsg = await saveMessage(convId, "user", input.trim());
-    if (savedUserMsg) {
-      setMessages(prev => prev.map(m => m.id === userMessage.id ? { ...savedUserMsg, role: savedUserMsg.role as "user" | "assistant" } : m));
+    // Save user message (no local fallback — platform is source of truth)
+    try {
+      const savedUserMsg = await saveMessage(convId, "user", input.trim());
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === userMessage.id
+            ? { ...savedUserMsg, role: savedUserMsg.role as "user" | "assistant" }
+            : m
+        )
+      );
+    } catch (e) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+      setIsStreaming(false);
+      toast({
+        variant: "destructive",
+        title: "Message not saved",
+        description: e instanceof Error ? e.message : "Unable to save message to the platform",
+      });
+      return;
     }
 
     // Update title if first message
@@ -212,11 +293,19 @@ export function useAegisChat() {
       updateConversationTitle(convId, input.trim());
     }
 
-    // Prepare messages for API
-    const apiMessages = [...messages, userMessage].map(m => ({
-      role: m.role,
-      content: m.content
-    }));
+    // Prepare messages for API (ALWAYS include operator identity + full chat history)
+    const operatorName = operator?.full_name?.trim() || null;
+    const operatorContext = operatorName
+      ? `Current operator: ${operatorName} (id: ${operator?.id ?? userId}).`
+      : `Current operator id: ${operator?.id ?? userId}. (Name not available from profile.)`;
+
+    const apiMessages = [
+      { role: "system", content: operatorContext },
+      ...[...messages, userMessage].map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    ];
 
     try {
       const resp = await fetch(AEGIS_CHAT_URL, {
@@ -225,7 +314,15 @@ export function useAegisChat() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          conversationId: convId,
+          operator: operator
+            ? { id: operator.id, full_name: operator.full_name ?? null }
+            : userId
+              ? { id: userId, full_name: null }
+              : null,
+        }),
       });
 
       if (!resp.ok) {
@@ -284,13 +381,25 @@ export function useAegisChat() {
         }
       }
 
-      // Save complete assistant message
+      // Save complete assistant message (platform source of truth)
       if (assistantContent && convId) {
-        const savedAssistantMsg = await saveMessage(convId, "assistant", assistantContent);
-        if (savedAssistantMsg) {
-          setMessages(prev => prev.map(m => 
-            m.id === assistantId ? { ...savedAssistantMsg, role: savedAssistantMsg.role as "user" | "assistant" } : m
-          ));
+        try {
+          const savedAssistantMsg = await saveMessage(convId, "assistant", assistantContent);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...savedAssistantMsg, role: savedAssistantMsg.role as "user" | "assistant" }
+                : m
+            )
+          );
+        } catch (e) {
+          // Remove unsaved assistant output to avoid showing non-platform data
+          setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          toast({
+            variant: "destructive",
+            title: "Response not saved",
+            description: e instanceof Error ? e.message : "Unable to save response to the platform",
+          });
         }
       }
 
@@ -306,7 +415,7 @@ export function useAegisChat() {
     } finally {
       setIsStreaming(false);
     }
-  }, [currentConversationId, messages, isStreaming, toast, userId]);
+  }, [currentConversationId, messages, isStreaming, toast, userId, operator]);
 
   const startNewConversation = useCallback(() => {
     setCurrentConversationId(null);
@@ -318,11 +427,14 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    if (!id.startsWith('local-')) {
-      await fortressClient
-        .from('agent_conversations')
+    for (const table of FORTRESS_CONVERSATION_TABLES) {
+      const { error } = await fortressClient
+        .from(table)
         .delete()
-        .eq('id', id);
+        .eq("id", id);
+      if (!error) break;
+      const code = (error as any)?.code;
+      if (code && code !== "PGRST205") break;
     }
     
     if (currentConversationId === id) {
