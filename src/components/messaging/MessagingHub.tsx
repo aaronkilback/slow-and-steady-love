@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { ConversationView } from "./ConversationView";
 import { BroadcastList } from "./BroadcastList";
 import { NewConversationDialog } from "./NewConversationDialog";
@@ -81,10 +82,10 @@ export function MessagingHub() {
         )
       )];
       
-      // Fetch profiles for all participants
+      // Fetch profiles from Fortress platform
       let profilesMap: Record<string, { full_name: string; avatar_url: string | null }> = {};
       if (userIds.length > 0) {
-        const { data: profilesData } = await supabase
+        const { data: profilesData } = await fortressClient
           .from('profiles')
           .select('id, full_name, avatar_url')
           .in('id', userIds);

@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -53,20 +54,27 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
   }, [open]);
 
   const getCurrentUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // Get user from Fortress auth
+    const { data: { user } } = await fortressClient.auth.getUser();
     if (user) setCurrentUserId(user.id);
   };
 
   const loadProfiles = async () => {
     setIsLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data, error } = await supabase
+    // Get current user from Fortress
+    const { data: { user } } = await fortressClient.auth.getUser();
+    
+    // Load profiles from Fortress platform
+    const { data, error } = await fortressClient
       .from('profiles')
       .select('id, full_name, avatar_url')
       .neq('id', user?.id || '');
 
     if (!error && data) {
       setProfiles(data);
+    } else {
+      console.log("Could not load profiles from Fortress:", error?.message);
+      setProfiles([]);
     }
     setIsLoading(false);
   };

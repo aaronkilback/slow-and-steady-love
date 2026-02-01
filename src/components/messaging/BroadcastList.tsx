@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { NewBroadcastDialog } from "./NewBroadcastDialog";
 
 interface Broadcast {
@@ -55,9 +56,11 @@ export function BroadcastList() {
   }, []);
 
   const checkAdminStatus = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // Get user from Fortress auth
+    const { data: { user } } = await fortressClient.auth.getUser();
     if (user) {
-      const { data } = await supabase
+      // Check admin status in Fortress
+      const { data } = await fortressClient
         .from('user_roles')
         .select('role')
         .eq('user_id', user.id)
@@ -71,6 +74,7 @@ export function BroadcastList() {
   const loadBroadcasts = async () => {
     setIsLoading(true);
     
+    // First get broadcasts
     const { data, error } = await supabase
       .from('broadcasts')
       .select(`
@@ -79,16 +83,32 @@ export function BroadcastList() {
         content,
         priority,
         created_at,
-        profiles:sender_id (
-          full_name
-        )
+        sender_id
       `)
       .order('created_at', { ascending: false });
 
     if (!error && data) {
+      // Get unique sender IDs
+      const senderIds = [...new Set(data.map((b: any) => b.sender_id))];
+      
+      // Fetch profiles from Fortress
+      let profilesMap: Record<string, { full_name: string }> = {};
+      if (senderIds.length > 0) {
+        const { data: profilesData } = await fortressClient
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', senderIds);
+        
+        if (profilesData) {
+          profilesMap = Object.fromEntries(
+            profilesData.map(p => [p.id, { full_name: p.full_name }])
+          );
+        }
+      }
+      
       const broadcastsWithSender = data.map((b: any) => ({
         ...b,
-        sender: b.profiles,
+        sender: profilesMap[b.sender_id] || { full_name: 'System' },
       }));
       setBroadcasts(broadcastsWithSender);
     }
