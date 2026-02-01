@@ -47,6 +47,16 @@ export function AegisChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
+  
+  // Refs to avoid stale closures in callbacks
+  const voiceModeOpenRef = useRef(voiceModeOpen);
+  const voiceStateRef = useRef(voiceState);
+  const currentTranscriptRef = useRef(currentTranscript);
+  
+  // Keep refs in sync
+  useEffect(() => { voiceModeOpenRef.current = voiceModeOpen; }, [voiceModeOpen]);
+  useEffect(() => { voiceStateRef.current = voiceState; }, [voiceState]);
+  useEffect(() => { currentTranscriptRef.current = currentTranscript; }, [currentTranscript]);
 
   // Track when speech ends to resume listening
   const handleSpeechEnd = useCallback(() => {
@@ -76,15 +86,27 @@ export function AegisChat() {
 
   // Handle automatic speech end detection (user stopped talking)
   const handleAutoSpeechEnd = useCallback(() => {
-    if (voiceModeOpen && voiceState === "listening") {
+    console.log("Speech end detected", { 
+      voiceModeOpen: voiceModeOpenRef.current, 
+      voiceState: voiceStateRef.current,
+      transcript: currentTranscriptRef.current 
+    });
+    
+    if (voiceModeOpenRef.current && voiceStateRef.current === "listening") {
       // Automatically send when user stops speaking
-      stopListeningRef.current?.();
+      const transcript = currentTranscriptRef.current.trim();
+      if (transcript) {
+        console.log("Sending voice message:", transcript);
+        setVoiceState("processing");
+        setPendingVoiceMessage(transcript);
+      }
     }
-  }, [voiceModeOpen, voiceState]);
+  }, []); // No dependencies - uses refs
 
   // Speech recognition hook with auto-detection
   const { isListening, isSupported: recognitionSupported, startListening, stopListening, toggleListening } = useSpeechRecognition({
     onTranscript: (transcript) => {
+      console.log("Final transcript:", transcript);
       setCurrentTranscript((prev) => prev + transcript);
       setInterimTranscript("");
     },
@@ -94,22 +116,6 @@ export function AegisChat() {
     onSpeechEnd: handleAutoSpeechEnd,
     silenceTimeout: 1500, // 1.5 seconds of silence triggers send
   });
-
-  // Store stopListening in a ref for use in callbacks
-  const stopListeningRef = useRef<() => void>();
-  stopListeningRef.current = () => {
-    stopListening();
-    if (currentTranscript.trim()) {
-      setVoiceState("processing");
-      setPendingVoiceMessage(currentTranscript.trim());
-    } else {
-      // No speech captured, go back to listening
-      setCurrentTranscript("");
-      setInterimTranscript("");
-      setTimeout(() => startListening(), 300);
-      setVoiceState("listening");
-    }
-  };
 
   // TTS is always supported (server-side), only check speech recognition
   const isSupported = recognitionSupported;
@@ -149,8 +155,10 @@ export function AegisChat() {
   // Send pending voice message
   useEffect(() => {
     if (pendingVoiceMessage && voiceState === "processing") {
+      console.log("Sending pending voice message to API:", pendingVoiceMessage);
       sendMessage(pendingVoiceMessage);
       setPendingVoiceMessage(null);
+      setCurrentTranscript(""); // Clear after sending
     }
   }, [pendingVoiceMessage, voiceState, sendMessage]);
 
