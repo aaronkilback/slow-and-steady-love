@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
-import { useWhisperSTT } from "@/hooks/useWhisperSTT";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useOpenAITTS } from "@/hooks/useOpenAITTS";
 import { VoiceMode } from "./VoiceMode";
 
@@ -41,76 +41,64 @@ export function AegisChat() {
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [currentTranscript, setCurrentTranscript] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
   const voiceModeOpenRef = useRef(voiceModeOpen);
   
-  // Keep ref in sync
   useEffect(() => { voiceModeOpenRef.current = voiceModeOpen; }, [voiceModeOpen]);
 
-  // Whisper STT hook - high accuracy speech-to-text
+  // Browser speech recognition - same as main Fortress platform
   const { 
     isListening, 
-    isProcessing: sttProcessing, 
-    isSupported: sttSupported, 
+    isSupported, 
     startListening, 
-    stopListening: stopRecording,
-    cancelListening 
-  } = useWhisperSTT({
+    stopListening 
+  } = useSpeechRecognition({
     onTranscript: (transcript) => {
-      console.log("Whisper transcript:", transcript);
-      setCurrentTranscript(transcript);
-      // Immediately send the message
-      if (transcript.trim() && voiceModeOpenRef.current) {
-        setVoiceState("processing");
-        sendMessage(transcript.trim());
-      }
+      setCurrentTranscript(prev => prev + transcript);
+      setInterimTranscript("");
     },
-    onError: (err) => {
-      console.error("STT error:", err);
-      setVoiceState("idle");
+    onInterimTranscript: (transcript) => {
+      setInterimTranscript(transcript);
     },
-    onListeningChange: (listening) => {
-      if (listening) {
-        setVoiceState("listening");
-      }
-    },
+    continuous: true,
   });
 
-  // Track when speech ends to resume listening
+  // Sync listening state
+  useEffect(() => {
+    if (isListening && voiceState !== "listening") {
+      setVoiceState("listening");
+    }
+  }, [isListening, voiceState]);
+
+  // Resume listening after Aegis finishes speaking
   const handleSpeechEnd = useCallback(() => {
     if (voiceModeOpenRef.current) {
       setVoiceState("idle");
       setAegisResponse("");
       setCurrentTranscript("");
-      // Small delay then start listening again for continuous conversation
+      setInterimTranscript("");
+      // Auto-restart listening after response
       setTimeout(() => {
         if (voiceModeOpenRef.current) {
           startListening();
+          setVoiceState("listening");
         }
       }, 500);
     }
   }, [startListening]);
 
-  // OpenAI TTS hook - uses tts-1-hd with "onyx" voice
-  const { speak, stop: stopSpeaking, isSpeaking, isLoading: ttsLoading } = useOpenAITTS({
+  // OpenAI TTS with onyx voice
+  const { speak, stop: stopSpeaking } = useOpenAITTS({
     onEnd: handleSpeechEnd,
     onError: (err) => {
       console.error("TTS error:", err);
       setVoiceState("idle");
     },
   });
-
-  // Update voice state when STT is processing
-  useEffect(() => {
-    if (sttProcessing) {
-      setVoiceState("processing");
-    }
-  }, [sttProcessing]);
-
-  const isSupported = sttSupported;
 
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
@@ -120,17 +108,28 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Voice toggle - tap to stop recording and send (Whisper processes on stop)
-  const handleVoiceToggle = useCallback(async () => {
+  // Voice toggle - tap to stop listening and send, tap again to start
+  const handleVoiceToggle = useCallback(() => {
     if (voiceState === "listening") {
-      // User tapped while listening - stop recording, Whisper will process
-      await stopRecording();
+      // User tapped while listening - stop and send what we have
+      stopListening();
+      const transcript = currentTranscript.trim();
+      if (transcript) {
+        setVoiceState("processing");
+        sendMessage(transcript);
+        setCurrentTranscript("");
+        setInterimTranscript("");
+      } else {
+        setVoiceState("idle");
+      }
     } else if (voiceState === "idle") {
       // Start listening
       setCurrentTranscript("");
+      setInterimTranscript("");
       startListening();
+      setVoiceState("listening");
     }
-  }, [voiceState, stopRecording, startListening]);
+  }, [voiceState, stopListening, startListening, currentTranscript, sendMessage]);
 
   // Watch for new assistant messages to speak
   useEffect(() => {
@@ -160,24 +159,27 @@ export function AegisChat() {
 
   // Handle closing voice mode
   const handleCloseVoiceMode = useCallback(() => {
-    cancelListening();
+    stopListening();
     stopSpeaking();
     setVoiceModeOpen(false);
     setVoiceState("idle");
     setCurrentTranscript("");
+    setInterimTranscript("");
     setAegisResponse("");
     lastMessageIdRef.current = null;
-  }, [cancelListening, stopSpeaking]);
+  }, [stopListening, stopSpeaking]);
 
-  // Handle opening voice mode - automatically start listening (ChatGPT-style)
+  // Handle opening voice mode - automatically start listening
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
+    setInterimTranscript("");
     setAegisResponse("");
     lastMessageIdRef.current = messages[messages.length - 1]?.id || null;
     // Start listening immediately when voice mode opens
     setTimeout(() => {
       startListening();
+      setVoiceState("listening");
     }, 300);
   }, [messages, startListening]);
 
