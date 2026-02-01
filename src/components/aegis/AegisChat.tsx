@@ -1,23 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, MicOff, Shield, Loader2 } from "lucide-react";
+import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
+import { useAegisChat } from "@/hooks/useAegisChat";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-}
-
-const welcomeMessage: Message = {
-  id: "welcome",
-  role: "assistant",
-  content: `**Aegis Online** — Silent Shield Security Intelligence Platform
+const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
 
 I'm your lead AI security agent, ready to assist with:
 - 🔍 **Threat Analysis** — Analyze and explain security threats
@@ -25,65 +17,41 @@ I'm your lead AI security agent, ready to assist with:
 - 🛡️ **Command Coordination** — Direct specialized agents for tasks
 - 📊 **Intelligence Briefings** — Get security updates and reports
 
-How can I assist you today, Operator?`,
-  timestamp: new Date(),
-};
+How can I assist you today, Operator?`;
 
 export function AegisChat() {
-  const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
+  const {
+    conversations,
+    currentConversationId,
+    messages,
+    isLoading,
+    isStreaming,
+    sendMessage,
+    startNewConversation,
+    selectConversation,
+    deleteConversation,
+  } = useAegisChat();
+
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Scroll to bottom when messages change
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }
-  }, [messages]);
+  }, [messages, isStreaming]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input.trim(),
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    if (!input.trim() || isStreaming) return;
+    const message = input;
     setInput("");
-    setIsLoading(true);
-
-    // TODO: Integrate with Lovable AI edge function
-    // Simulating response for now
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: `Understood, Operator. Processing your request...
-
-I've analyzed your query regarding: **"${userMessage.content}"**
-
-Current system status:
-- **Sentinel Agent**: Online, monitoring perimeter
-- **OSINT Agent**: Active, processing intelligence feeds
-- **Monitor Agent**: Running network analysis
-
-I'll provide a detailed briefing shortly. Is there anything specific you'd like me to prioritize?`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsLoading(false);
-    }, 1500);
+    await sendMessage(message);
   };
 
   const toggleVoice = () => {
     setIsListening(!isListening);
-    // TODO: Implement voice recognition with ElevenLabs
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -93,27 +61,106 @@ I'll provide a detailed briefing shortly. Is there anything specific you'd like 
     }
   };
 
+  const displayMessages = messages.length > 0 ? messages : [];
+
   return (
     <div className="flex h-[calc(100vh-5rem)] flex-col">
       {/* Chat header */}
-      <div className="flex items-center gap-3 border-b border-border bg-card/50 px-4 py-3">
-        <div className="relative">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 glow-cyan-sm">
-            <Shield className="h-5 w-5 text-primary" />
+      <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 glow-cyan-sm">
+              <Shield className="h-5 w-5 text-primary" />
+            </div>
+            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-low" />
           </div>
-          <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-low" />
+          <div>
+            <h2 className="font-semibold text-foreground">Aegis</h2>
+            <p className="text-xs text-muted-foreground">Lead AI Security Agent</p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-semibold text-foreground">Aegis</h2>
-          <p className="text-xs text-muted-foreground">Lead AI Security Agent</p>
+
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={startNewConversation}>
+            <Plus className="h-5 w-5" />
+          </Button>
+          
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <History className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent>
+              <SheetHeader>
+                <SheetTitle>Conversation History</SheetTitle>
+              </SheetHeader>
+              <ScrollArea className="h-[calc(100vh-8rem)] mt-4">
+                <div className="space-y-2 pr-4">
+                  {conversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors",
+                        currentConversationId === conv.id 
+                          ? "bg-primary/20 border border-primary/50" 
+                          : "bg-card hover:bg-card/80"
+                      )}
+                      onClick={() => selectConversation(conv.id)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">
+                          {conv.title || "New Conversation"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(conv.updated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteConversation(conv.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ))}
+                  {conversations.length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">
+                      No previous conversations
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
       {/* Messages area */}
       <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
         <div className="space-y-4 pb-4">
+          {/* Show welcome message when no messages */}
+          {displayMessages.length === 0 && !isLoading && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-card border border-border rounded-bl-md">
+                <div className="prose prose-sm max-w-none prose-invert prose-p:text-foreground prose-strong:text-primary prose-li:text-muted-foreground">
+                  <ReactMarkdown>{welcomeContent}</ReactMarkdown>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           <AnimatePresence initial={false}>
-            {messages.map((message) => (
+            {displayMessages.map((message) => (
               <motion.div
                 key={message.id}
                 initial={{ opacity: 0, y: 10 }}
@@ -138,20 +185,20 @@ I'll provide a detailed briefing shortly. Is there anything specific you'd like 
                       ? "prose-invert" 
                       : "prose-invert prose-p:text-foreground prose-strong:text-primary prose-li:text-muted-foreground"
                   )}>
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                    <ReactMarkdown>{message.content || "..."}</ReactMarkdown>
                   </div>
                   <p className={cn(
                     "mt-2 text-[10px]",
                     message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
                   )}>
-                    {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>
               </motion.div>
             ))}
           </AnimatePresence>
           
-          {isLoading && (
+          {isStreaming && displayMessages[displayMessages.length - 1]?.role !== "assistant" && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -191,12 +238,12 @@ I'll provide a detailed briefing shortly. Is there anything specific you'd like 
             onKeyDown={handleKeyPress}
             placeholder="Message Aegis..."
             className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
-            disabled={isLoading}
+            disabled={isStreaming}
           />
           <Button
             size="icon"
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isStreaming}
             className="shrink-0"
           >
             <Send className="h-5 w-5" />

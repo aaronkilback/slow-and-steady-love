@@ -2,3 +2,6 @@ project_id = "odvvexosqawixehvfzed"
 
 [functions.aegis-monitor]
 verify_jwt = false
+
+[functions.aegis-chat]
+verify_jwt = false
