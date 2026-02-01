@@ -64,9 +64,9 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
     
-    // Try to load from Fortress aegis_conversations table
+    // Load from Fortress agent_conversations table (the correct table name)
     const { data, error } = await fortressClient
-      .from('aegis_conversations')
+      .from('agent_conversations')
       .select('id, title, updated_at')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false });
@@ -88,7 +88,7 @@ export function useAegisChat() {
     setIsLoading(true);
     
     const { data, error } = await fortressClient
-      .from('aegis_messages')
+      .from('agent_messages')
       .select('id, role, content, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
@@ -115,9 +115,9 @@ export function useAegisChat() {
       return null;
     }
 
-    // Try to create in Fortress
+    // Create in Fortress agent_conversations table
     const { data, error } = await fortressClient
-      .from('aegis_conversations')
+      .from('agent_conversations')
       .insert({ user_id: userId })
       .select('id')
       .single();
@@ -147,7 +147,7 @@ export function useAegisChat() {
     }
 
     const { data, error } = await fortressClient
-      .from('aegis_messages')
+      .from('agent_messages')
       .insert({
         conversation_id: conversationId,
         role,
@@ -174,7 +174,7 @@ export function useAegisChat() {
     
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
     await fortressClient
-      .from('aegis_conversations')
+      .from('agent_conversations')
       .update({ title })
       .eq('id', conversationId);
     loadConversations();
@@ -320,7 +320,7 @@ export function useAegisChat() {
   const deleteConversation = useCallback(async (id: string) => {
     if (!id.startsWith('local-')) {
       await fortressClient
-        .from('aegis_conversations')
+        .from('agent_conversations')
         .delete()
         .eq('id', id);
     }
