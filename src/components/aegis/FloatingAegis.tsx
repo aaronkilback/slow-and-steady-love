@@ -7,6 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
+import { SOSButton } from "@/components/messaging/SOSButton";
+import { useToast } from "@/hooks/use-toast";
 
 interface FloatingAegisProps {
   className?: string;
@@ -27,12 +29,23 @@ export function FloatingAegis({ className }: FloatingAegisProps) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
   
   const {
     messages,
     isStreaming,
     sendMessage,
   } = useAegisChat();
+
+  const handleSOSTrigger = () => {
+    toast({
+      title: "🚨 SOS Activated",
+      description: "Emergency alert sent to all available agents and operators.",
+      variant: "destructive",
+    });
+    // Send SOS message to Aegis
+    sendMessage("EMERGENCY SOS TRIGGERED - Operator requires immediate assistance. Initiate emergency protocols.");
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -71,20 +84,26 @@ export function FloatingAegis({ className }: FloatingAegisProps) {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             className={cn(
-              "fixed bottom-24 right-4 z-40",
+              "fixed bottom-24 right-4 z-40 flex items-center gap-3",
               className
             )}
           >
-            <Button
-              size="icon"
-              onClick={() => setIsOpen(true)}
-              className="h-14 w-14 rounded-full shadow-lg glow-cyan bg-primary hover:bg-primary/90"
-            >
-              <Shield className="h-6 w-6" />
-            </Button>
+            {/* SOS Button */}
+            <SOSButton onTrigger={handleSOSTrigger} />
             
-            {/* Pulse animation */}
-            <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping pointer-events-none" />
+            {/* Aegis Button */}
+            <div className="relative">
+              <Button
+                size="icon"
+                onClick={() => setIsOpen(true)}
+                className="h-14 w-14 rounded-full shadow-lg glow-cyan bg-primary hover:bg-primary/90"
+              >
+                <Shield className="h-6 w-6" />
+              </Button>
+              
+              {/* Pulse animation */}
+              <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping pointer-events-none" />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
