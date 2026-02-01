@@ -64,7 +64,7 @@ export function useAegisChat() {
     }
   }, [userId]);
 
-  // Load operator profile (real, from Fortress)
+  // Load operator profile from auth user_metadata (most reliable source on Fortress)
   useEffect(() => {
     if (!userId) {
       setOperator(null);
@@ -73,39 +73,17 @@ export function useAegisChat() {
 
     let cancelled = false;
     (async () => {
-      // Try different column names as Fortress may use 'name' or 'full_name'
-      let profileData: { id: string; name?: string | null; full_name?: string | null; avatar_url?: string | null } | null = null;
+      // Get the name from user_metadata which is always available from auth
+      const { data: { user } } = await fortressClient.auth.getUser();
       
-      // First try 'name' column (Fortress schema)
-      const { data: nameData, error: nameError } = await fortressClient
-        .from("profiles")
-        .select("id, name, avatar_url")
-        .eq("id", userId)
-        .maybeSingle();
-
       if (cancelled) return;
       
-      if (!nameError && nameData) {
-        profileData = nameData;
-      } else {
-        // Fallback to 'full_name' column
-        const { data: fullNameData, error: fullNameError } = await fortressClient
-          .from("profiles")
-          .select("id, full_name, avatar_url")
-          .eq("id", userId)
-          .maybeSingle();
-        
-        if (cancelled) return;
-        if (!fullNameError && fullNameData) {
-          profileData = { ...fullNameData, name: fullNameData.full_name };
-        }
-      }
-
-      if (profileData) {
+      if (user) {
+        // user_metadata.name is the most reliable source on Fortress
+        const operatorName = user.user_metadata?.name ?? user.user_metadata?.full_name ?? null;
         setOperator({ 
-          id: profileData.id, 
-          name: profileData.name ?? profileData.full_name ?? null, 
-          avatar_url: profileData.avatar_url ?? null 
+          id: user.id, 
+          name: operatorName,
         });
       } else {
         setOperator({ id: userId, name: null });
