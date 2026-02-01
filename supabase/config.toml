@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.aegis-chat]
 verify_jwt = false
+
+[functions.aegis-tts]
+verify_jwt = false

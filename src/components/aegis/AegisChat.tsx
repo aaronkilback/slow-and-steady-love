@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
+import { useOpenAITTS } from "@/hooks/useOpenAITTS";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -64,10 +64,14 @@ export function AegisChat() {
     }
   }, [voiceModeOpen]);
 
-  // Speech synthesis hook
-  const { speak, stop: stopSpeaking, isSpeaking, isSupported: synthSupported } = useSpeechSynthesis({
-    rate: 1,
+  // OpenAI TTS hook - uses tts-1-hd with "onyx" voice
+  const { speak, stop: stopSpeaking, isSpeaking, isLoading: ttsLoading } = useOpenAITTS({
     onEnd: handleSpeechEnd,
+    onError: (err) => {
+      console.error("TTS error:", err);
+      // Fall back to idle state on error
+      setVoiceState("idle");
+    },
   });
 
   // Speech recognition hook
@@ -81,7 +85,8 @@ export function AegisChat() {
     },
   });
 
-  const isSupported = recognitionSupported && synthSupported;
+  // TTS is always supported (server-side), only check speech recognition
+  const isSupported = recognitionSupported;
 
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
