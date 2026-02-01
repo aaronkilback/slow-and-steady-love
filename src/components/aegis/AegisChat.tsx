@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { useWhisperSTT } from "@/hooks/useWhisperSTT";
 import { useOpenAITTS } from "@/hooks/useOpenAITTS";
 import { VoiceMode } from "./VoiceMode";
 
@@ -40,85 +40,77 @@ export function AegisChat() {
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [interimTranscript, setInterimTranscript] = useState("");
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
-  const [pendingVoiceMessage, setPendingVoiceMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastMessageIdRef = useRef<string | null>(null);
-  
-  // Refs to avoid stale closures in callbacks
   const voiceModeOpenRef = useRef(voiceModeOpen);
-  const voiceStateRef = useRef(voiceState);
-  const currentTranscriptRef = useRef(currentTranscript);
   
-  // Keep refs in sync
+  // Keep ref in sync
   useEffect(() => { voiceModeOpenRef.current = voiceModeOpen; }, [voiceModeOpen]);
-  useEffect(() => { voiceStateRef.current = voiceState; }, [voiceState]);
-  useEffect(() => { currentTranscriptRef.current = currentTranscript; }, [currentTranscript]);
+
+  // Whisper STT hook - high accuracy speech-to-text
+  const { 
+    isListening, 
+    isProcessing: sttProcessing, 
+    isSupported: sttSupported, 
+    startListening, 
+    stopListening: stopRecording,
+    cancelListening 
+  } = useWhisperSTT({
+    onTranscript: (transcript) => {
+      console.log("Whisper transcript:", transcript);
+      setCurrentTranscript(transcript);
+      // Immediately send the message
+      if (transcript.trim() && voiceModeOpenRef.current) {
+        setVoiceState("processing");
+        sendMessage(transcript.trim());
+      }
+    },
+    onError: (err) => {
+      console.error("STT error:", err);
+      setVoiceState("idle");
+    },
+    onListeningChange: (listening) => {
+      if (listening) {
+        setVoiceState("listening");
+      }
+    },
+  });
 
   // Track when speech ends to resume listening
   const handleSpeechEnd = useCallback(() => {
-    if (voiceModeOpen) {
+    if (voiceModeOpenRef.current) {
       setVoiceState("idle");
       setAegisResponse("");
+      setCurrentTranscript("");
       // Small delay then start listening again for continuous conversation
       setTimeout(() => {
-        if (voiceModeOpen) {
-          setCurrentTranscript("");
+        if (voiceModeOpenRef.current) {
           startListening();
-          setVoiceState("listening");
         }
       }, 500);
     }
-  }, [voiceModeOpen]);
+  }, [startListening]);
 
   // OpenAI TTS hook - uses tts-1-hd with "onyx" voice
   const { speak, stop: stopSpeaking, isSpeaking, isLoading: ttsLoading } = useOpenAITTS({
     onEnd: handleSpeechEnd,
     onError: (err) => {
       console.error("TTS error:", err);
-      // Fall back to idle state on error
       setVoiceState("idle");
     },
   });
 
-  // Handle automatic speech end detection (user stopped talking)
-  const handleAutoSpeechEnd = useCallback(() => {
-    console.log("Speech end detected", { 
-      voiceModeOpen: voiceModeOpenRef.current, 
-      voiceState: voiceStateRef.current,
-      transcript: currentTranscriptRef.current 
-    });
-    
-    if (voiceModeOpenRef.current && voiceStateRef.current === "listening") {
-      // Automatically send when user stops speaking
-      const transcript = currentTranscriptRef.current.trim();
-      if (transcript) {
-        console.log("Sending voice message:", transcript);
-        setVoiceState("processing");
-        setPendingVoiceMessage(transcript);
-      }
+  // Update voice state when STT is processing
+  useEffect(() => {
+    if (sttProcessing) {
+      setVoiceState("processing");
     }
-  }, []); // No dependencies - uses refs
+  }, [sttProcessing]);
 
-  // Speech recognition hook with auto-detection
-  const { isListening, isSupported: recognitionSupported, startListening, stopListening, toggleListening } = useSpeechRecognition({
-    onTranscript: (transcript) => {
-      console.log("Final transcript:", transcript);
-      setCurrentTranscript((prev) => prev + transcript);
-      setInterimTranscript("");
-    },
-    onInterimTranscript: (transcript) => {
-      setInterimTranscript(transcript);
-    },
-    onSpeechEnd: handleAutoSpeechEnd,
-    silenceTimeout: 1500, // 1.5 seconds of silence triggers send
-  });
-
-  // TTS is always supported (server-side), only check speech recognition
-  const isSupported = recognitionSupported;
+  const isSupported = sttSupported;
 
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
@@ -128,39 +120,17 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Voice mode uses automatic speech detection - this is now just for manual interruption
-  const handleVoiceToggle = useCallback(() => {
+  // Voice toggle - tap to stop recording and send (Whisper processes on stop)
+  const handleVoiceToggle = useCallback(async () => {
     if (voiceState === "listening") {
-      // User manually tapped while listening - send what we have
-      stopListening();
-      if (currentTranscript.trim()) {
-        setVoiceState("processing");
-        setPendingVoiceMessage(currentTranscript.trim());
-      } else {
-        // Nothing captured, resume listening
-        setCurrentTranscript("");
-        setInterimTranscript("");
-        setTimeout(() => startListening(), 300);
-        setVoiceState("listening");
-      }
+      // User tapped while listening - stop recording, Whisper will process
+      await stopRecording();
     } else if (voiceState === "idle") {
       // Start listening
       setCurrentTranscript("");
-      setInterimTranscript("");
       startListening();
-      setVoiceState("listening");
     }
-  }, [voiceState, stopListening, startListening, currentTranscript]);
-
-  // Send pending voice message
-  useEffect(() => {
-    if (pendingVoiceMessage && voiceState === "processing") {
-      console.log("Sending pending voice message to API:", pendingVoiceMessage);
-      sendMessage(pendingVoiceMessage);
-      setPendingVoiceMessage(null);
-      setCurrentTranscript(""); // Clear after sending
-    }
-  }, [pendingVoiceMessage, voiceState, sendMessage]);
+  }, [voiceState, stopRecording, startListening]);
 
   // Watch for new assistant messages to speak
   useEffect(() => {
@@ -190,27 +160,24 @@ export function AegisChat() {
 
   // Handle closing voice mode
   const handleCloseVoiceMode = useCallback(() => {
-    stopListening();
+    cancelListening();
     stopSpeaking();
     setVoiceModeOpen(false);
     setVoiceState("idle");
-    setInterimTranscript("");
     setCurrentTranscript("");
     setAegisResponse("");
     lastMessageIdRef.current = null;
-  }, [stopListening, stopSpeaking]);
+  }, [cancelListening, stopSpeaking]);
 
   // Handle opening voice mode - automatically start listening (ChatGPT-style)
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
-    setInterimTranscript("");
     setAegisResponse("");
     lastMessageIdRef.current = messages[messages.length - 1]?.id || null;
     // Start listening immediately when voice mode opens
     setTimeout(() => {
       startListening();
-      setVoiceState("listening");
     }, 300);
   }, [messages, startListening]);
 
@@ -444,7 +411,7 @@ export function AegisChat() {
         isOpen={voiceModeOpen}
         voiceState={voiceState}
         isSupported={isSupported}
-        interimTranscript={interimTranscript}
+        interimTranscript=""
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
         onClose={handleCloseVoiceMode}

@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.aegis-tts]
 verify_jwt = false
+
+[functions.aegis-stt]
+verify_jwt = false
