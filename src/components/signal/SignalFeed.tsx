@@ -88,7 +88,7 @@ function SignalCard({ signal }: { signal: SignalType }) {
           </div>
           
           <AnimatePresence>
-            {isExpanded && signal.details && (
+            {isExpanded && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
@@ -96,10 +96,48 @@ function SignalCard({ signal }: { signal: SignalType }) {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="mt-4 pt-4 border-t border-border">
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {signal.details}
-                  </p>
+                <div className="mt-4 pt-4 border-t border-border space-y-3">
+                  {/* Full description */}
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
+                    <p className="text-sm text-foreground leading-relaxed">
+                      {signal.description}
+                    </p>
+                  </div>
+                  
+                  {/* Details if available */}
+                  {signal.details && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Details</p>
+                      <p className="text-sm text-foreground leading-relaxed">
+                        {signal.details}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Metadata */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <p className="text-muted-foreground">Source</p>
+                      <p className="text-foreground font-medium">{signal.source || "Unknown"}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Category</p>
+                      <p className="text-foreground font-medium">{signal.category || "General"}</p>
+                    </div>
+                    {signal.location && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Location</p>
+                        <p className="text-foreground font-medium">{signal.location}</p>
+                      </div>
+                    )}
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">Timestamp</p>
+                      <p className="text-foreground font-medium">
+                        {new Date(signal.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}
