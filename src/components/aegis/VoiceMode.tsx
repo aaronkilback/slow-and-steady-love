@@ -13,8 +13,6 @@ interface VoiceModeProps {
   interimTranscript: string;
   currentTranscript: string;
   aegisResponse: string;
-  micLevel?: number; // 0-1 normalized mic input level
-  lastEventType?: string | null;
   onClose: () => void;
   onToggleListening: () => void;
   onStopSpeaking: () => void;
@@ -28,18 +26,12 @@ export function VoiceMode({
   interimTranscript,
   currentTranscript,
   aegisResponse,
-  micLevel = 0,
-  lastEventType,
   onClose,
   onStopSpeaking,
 }: VoiceModeProps) {
   const isListening = voiceState === "listening";
   const isProcessing = voiceState === "processing";
   const isSpeaking = voiceState === "speaking";
-  
-  // Mic level indicator bars (5 bars)
-  const micBars = 5;
-  const activeBars = Math.round(micLevel * micBars);
 
   const getStatusText = () => {
     if (!isSupported) return "Voice not supported in this browser";
@@ -243,42 +235,6 @@ export function VoiceMode({
             >
               {getStatusText()}
             </motion.p>
-            
-            {/* Mic Level Indicator */}
-            {isListening && (
-              <motion.div
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-4 flex flex-col items-center justify-center gap-2"
-              >
-                <div className="flex items-center justify-center gap-1">
-                  <span className="text-xs text-muted-foreground mr-2">MIC</span>
-                  {[...Array(micBars)].map((_, i) => (
-                    <motion.div
-                      key={i}
-                      className={cn(
-                        "w-2 rounded-full transition-all duration-75",
-                        i < activeBars ? "bg-primary" : "bg-muted"
-                      )}
-                      style={{
-                        height: `${12 + i * 4}px`,
-                      }}
-                      animate={i < activeBars ? {
-                        scaleY: [1, 1.2, 1],
-                      } : {}}
-                      transition={{ duration: 0.15 }}
-                    />
-                  ))}
-                  <span className="text-xs text-muted-foreground ml-2">
-                    {micLevel > 0.1 ? "Active" : "No input"}
-                  </span>
-                </div>
-
-                <div className="text-[11px] text-muted-foreground">
-                  Last event: {lastEventType ?? "—"}
-                </div>
-              </motion.div>
-            )}
           </motion.div>
 
           {/* Transcript displays */}
