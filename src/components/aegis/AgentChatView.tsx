@@ -58,6 +58,7 @@ export function AgentChatView({ agentId = "aegis", onBack }: AgentChatViewProps)
     startNewConversation,
     selectConversation,
     deleteConversation,
+    saveVoiceMessage,
     agentConfig,
   } = useAgentChat(agentId);
 
@@ -102,9 +103,19 @@ You have full access to platform intelligence. Reference signals, team status, a
     connect: connectRealtime,
     disconnect: disconnectRealtime,
   } = useOpenAIRealtime({
-    onTranscript: (text) => setCurrentTranscript(text),
-    onAgentResponseComplete: (text) => {
+    onTranscript: async (text) => {
+      setCurrentTranscript(text);
+      // Save user's voice transcript to chat history
+      if (text.trim()) {
+        await saveVoiceMessage("user", text);
+      }
+    },
+    onAgentResponseComplete: async (text) => {
       setAegisResponse(text);
+      // Save Aegis voice response to chat history
+      if (text.trim()) {
+        await saveVoiceMessage("assistant", text);
+      }
       setTimeout(() => {
         setAegisResponse("");
         setCurrentTranscript("");
