@@ -22,6 +22,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
+
+  // Accumulate streaming text deltas so we can surface replies even when only response.done fires.
+  const responseTextRef = useRef<string>("");
   
   useEffect(() => { 
     optionsRef.current = options; 
@@ -101,6 +104,25 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     setLastEventType(null);
     setStatus('idle');
   }, [stopMicLevelMonitor]);
+
+  const extractTextFromResponseDone = useCallback((evt: any): string => {
+    const out = evt?.response?.output;
+    if (Array.isArray(out)) {
+      const parts: string[] = [];
+      for (const item of out) {
+        const content = item?.content;
+        if (!Array.isArray(content)) continue;
+        for (const c of content) {
+          const t = (c?.text ?? c?.transcript) as unknown;
+          if (typeof t === 'string' && t.trim()) parts.push(t.trim());
+        }
+      }
+      if (parts.length) return parts.join('\n');
+    }
+    if (typeof evt?.text === 'string' && evt.text.trim()) return evt.text.trim();
+    if (typeof evt?.transcript === 'string' && evt.transcript.trim()) return evt.transcript.trim();
+    return '';
+  }, []);
 
   /**
    * CRITICAL: This function MUST be called directly from a button onClick handler.
@@ -200,15 +222,49 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             console.log('[Realtime] User said:', d.transcript);
             optionsRef.current.onTranscript?.(d.transcript);
           }
+
+          // If VAD detects turn end, explicitly request a response (helps iOS PWA reliability)
+          if (d.type === 'input_audio_buffer.speech_stopped') {
+            try {
+              dcRef.current?.send(
+                JSON.stringify({
+                  type: 'response.create',
+                  response: {
+                    output_modalities: ['audio', 'text'],
+                    modalities: ['audio', 'text'],
+                  },
+                })
+              );
+            } catch {
+              // ignore
+            }
+          }
           
           // Agent response complete (audio transcript)
           if (d.type === 'response.audio_transcript.done') {
             console.log('[Realtime] Agent said:', d.transcript);
             optionsRef.current.onAgentResponseComplete?.(d.transcript || '');
           }
+
+          // Newer text streaming event names
+          if (d.type === 'response.output_text.delta') {
+            const delta = typeof d.delta === 'string' ? d.delta : '';
+            if (delta) responseTextRef.current += delta;
+          }
+
+          if (d.type === 'response.output_text.done') {
+            const finalText =
+              (typeof d.text === 'string' && d.text.trim())
+                ? d.text.trim()
+                : responseTextRef.current.trim();
+            if (finalText) {
+              optionsRef.current.onAgentResponseComplete?.(finalText);
+            }
+            responseTextRef.current = '';
+          }
           
           // Agent is speaking
-          if (d.type === 'response.audio.delta') {
+          if (d.type === 'response.audio.delta' || d.type === 'response.output_audio.delta') {
             setIsAgentSpeaking(true);
             setStatus('speaking');
           }
@@ -217,6 +273,13 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           if (d.type === 'response.done') {
             setIsAgentSpeaking(false);
             setStatus('connected');
+
+            // Pull any text embedded in response.done (common on iOS PWA)
+            const doneText = extractTextFromResponseDone(d) || responseTextRef.current.trim();
+            if (doneText) {
+              optionsRef.current.onAgentResponseComplete?.(doneText);
+            }
+            responseTextRef.current = '';
           }
           
           // Error from API
