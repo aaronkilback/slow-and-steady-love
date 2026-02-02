@@ -148,6 +148,35 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
         break;
 
+      case 'conversation.item.input_audio_transcription.delta':
+        {
+          const delta = (event as Record<string, unknown>).delta as string;
+          if (delta) {
+            // Interim transcript support (don’t mark final)
+            setTranscript(prev => prev + delta);
+            optionsRef.current.onTranscript?.(delta, false);
+          }
+        }
+        break;
+
+      // Some SDKs emit the transcript inside conversation.item.created content.
+      case 'conversation.item.created':
+        {
+          const item = (event as any).item;
+          const content = item?.content;
+          if (Array.isArray(content)) {
+            const audioPart = content.find((c: any) => c?.type === 'input_audio');
+            const t = audioPart?.transcript;
+            if (typeof t === 'string' && t.length) {
+              console.log('User transcript (item.created):', t);
+              setTranscript(t);
+              optionsRef.current.onTranscript?.(t, true);
+              clearListeningWatchdog();
+            }
+          }
+        }
+        break;
+
       case 'response.audio_transcript.delta':
         {
           const delta = (event as Record<string, unknown>).delta as string;
@@ -189,6 +218,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         break;
 
       case 'response.audio.delta':
+      case 'response.output_audio.delta':
         if (responseFallbackRef.current) {
           window.clearTimeout(responseFallbackRef.current);
           responseFallbackRef.current = null;
@@ -199,8 +229,26 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         break;
 
       case 'response.audio.done':
+      case 'response.output_audio.done':
         setIsAgentSpeaking(false);
         updateStatus('connected');
+        break;
+
+      case 'response.output_audio_transcript.delta':
+        {
+          const delta = (event as Record<string, unknown>).delta as string;
+          if (delta) {
+            setAgentResponse(prev => prev + delta);
+            optionsRef.current.onAgentResponse?.(delta);
+          }
+        }
+        break;
+
+      case 'response.output_audio_transcript.done':
+        {
+          const full = (event as Record<string, unknown>).transcript as string;
+          optionsRef.current.onAgentResponseComplete?.(full || '');
+        }
         break;
 
       case 'response.done':
@@ -411,6 +459,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           connectTimeoutRef.current = null;
         }
         updateStatus('connected');
+
+        // Force session settings on connect (helps on iOS PWA when session create settings are flaky)
+        try {
+          dc.send(JSON.stringify({
+            type: 'session.update',
+            session: {
+              modalities: ['audio', 'text'],
+              input_audio_transcription: { model: 'whisper-1' },
+              // Slightly shorter silence to encourage end-of-utterance
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.6,
+                prefix_padding_ms: 200,
+                silence_duration_ms: 400,
+                create_response: true,
+              },
+            },
+          }));
+        } catch {
+          // ignore
+        }
 
         userHasSpokenRef.current = false;
         greetedRef.current = false;
