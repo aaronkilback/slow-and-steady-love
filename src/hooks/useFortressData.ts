@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { fortressClient } from "@/lib/fortress-client";
 
-// Types matching Fortress platform database
+// Types matching Fortress platform database - complete signal data
 export interface Signal {
   id: string;
   title: string;
@@ -12,6 +12,10 @@ export interface Signal {
   created_at: string;
   location?: string;
   details?: string;
+  status?: string;
+  assignee?: string;
+  metadata?: Record<string, any>;
+  raw?: Record<string, any>; // Full raw signal for complete platform access
 }
 
 export interface Agent {
@@ -37,20 +41,44 @@ export function useSignals() {
   return useQuery({
     queryKey: ["fortress-signals"],
     queryFn: async () => {
-      // Try to fetch from the signals table
-      const { data, error } = await fortressClient
-        .from("signals")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50);
+      // Try multiple table names for cross-platform compatibility
+      const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
+      
+      for (const table of SIGNAL_TABLES) {
+        const { data, error } = await fortressClient
+          .from(table)
+          .select("*") // Fetch ALL fields for complete signal content
+          .order("created_at", { ascending: false })
+          .limit(100);
 
-      if (error) {
-        console.error("Error fetching signals:", error);
-        // Return empty array if table doesn't exist or other error
-        return [];
+        if (!error && data) {
+          // Map to Signal interface, preserving all extra fields
+          return (data || []).map((signal: any) => ({
+            id: signal.id,
+            title: signal.title || signal.name || "Untitled Signal",
+            description: signal.description || signal.summary || "",
+            severity: signal.severity || signal.priority || "low",
+            category: signal.category || signal.type || "General",
+            source: signal.source || signal.origin || "Platform",
+            created_at: signal.created_at,
+            location: signal.location || signal.geo_location || null,
+            details: signal.details || signal.content || signal.raw_data || signal.body || null,
+            // Preserve additional fields for full context
+            status: signal.status,
+            assignee: signal.assignee || signal.assigned_to,
+            metadata: signal.metadata || signal.extra_data,
+            raw: signal, // Keep full raw signal for complete access
+          })) as Signal[];
+        }
+
+        const code = (error as any)?.code;
+        if (code && code !== "PGRST205" && code !== "42P01") {
+          console.warn(`Error fetching from ${table}:`, error);
+          break;
+        }
       }
 
-      return (data || []) as Signal[];
+      return [];
     },
     staleTime: 1000 * 30, // 30 seconds
     refetchInterval: 1000 * 60, // Refetch every minute
