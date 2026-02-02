@@ -23,9 +23,11 @@ serve(async (req) => {
     }
 
     let agentContext = "";
+    let offerSdp = "";
     try {
       const body = await req.json();
       agentContext = body.agentContext || "";
+      offerSdp = body.offer_sdp || "";
     } catch {
       // No body or invalid JSON, use defaults
     }
@@ -86,6 +88,40 @@ ${agentContext ? `Current context: ${agentContext}` : ""}`;
     }
 
     const data = await response.json();
+
+    // If we got an SDP offer from the client, complete the handshake server-side.
+    // This avoids client-side CORS / network restrictions that can cause "Starting..." stalls in production.
+    if (offerSdp && typeof offerSdp === "string") {
+      const sdpResponse = await fetch(
+        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${data.client_secret?.value}`,
+            "Content-Type": "application/sdp",
+          },
+          body: offerSdp,
+        }
+      );
+
+      if (!sdpResponse.ok) {
+        const errorText = await sdpResponse.text();
+        console.error("OpenAI Realtime SDP error:", sdpResponse.status, errorText);
+        return new Response(
+          JSON.stringify({ error: `OpenAI Realtime SDP error: ${sdpResponse.status}` }),
+          { status: sdpResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const answer_sdp = await sdpResponse.text();
+      return new Response(
+        JSON.stringify({
+          session_id: data.id,
+          answer_sdp,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     return new Response(
       JSON.stringify({

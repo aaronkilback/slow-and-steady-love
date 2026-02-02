@@ -111,22 +111,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       updateStatus("connecting");
       console.log("[Realtime] connect() starting");
 
-      // Get ephemeral token from edge function
-      const { data, error } = await supabase.functions.invoke("openai-realtime-token", {
-        body: { agentContext: options.agentContext },
-      });
-
-      if (error || !data?.client_secret) {
-        console.error("Token error:", error || "No client secret");
-        options.onError?.(error?.message || "Failed to get realtime token");
-        updateStatus("idle");
-        return;
-      }
-
-      console.log("[Realtime] token acquired", {
-        hasValue: !!data?.client_secret?.value,
-        expiresAt: data?.client_secret?.expires_at,
-      });
+      // We do the SDP handshake via backend function to avoid client-side CORS/network blockers
+      // that commonly cause "Starting..." stalls in production.
 
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
@@ -257,27 +243,21 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         return;
       }
 
-      const sdpResponse = await fetch(
-        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${data.client_secret.value}`,
-            "Content-Type": "application/sdp",
-          },
-          body: localSdp,
-        }
-      );
+      const { data, error } = await supabase.functions.invoke("openai-realtime-token", {
+        body: {
+          agentContext: options.agentContext,
+          offer_sdp: localSdp,
+        },
+      });
 
-      if (!sdpResponse.ok) {
-        const errorText = await sdpResponse.text();
-        console.error("[Realtime] SDP response error:", errorText);
-        options.onError?.("Failed to establish connection");
+      if (error || !data?.answer_sdp) {
+        console.error("[Realtime] Handshake error:", error || data);
+        options.onError?.(error?.message || "Failed to establish connection");
         disconnect();
         return;
       }
 
-      const answerSdp = await sdpResponse.text();
+      const answerSdp = data.answer_sdp as string;
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
       console.log("[Realtime] Connection established");
