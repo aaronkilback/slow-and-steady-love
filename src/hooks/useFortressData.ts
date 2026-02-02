@@ -52,21 +52,24 @@ export function useSignals() {
           .limit(100);
 
         if (!error && data) {
+          console.log('[Signals] Raw signal data from platform:', data[0]); // Debug first signal
+          
           // Map to Signal interface, preserving all extra fields
           return (data || []).map((signal: any) => ({
             id: signal.id,
             title: signal.title || signal.name || "Untitled Signal",
-            description: signal.description || signal.summary || "",
-            severity: signal.severity || signal.priority || "low",
-            category: signal.category || signal.type || "General",
-            source: signal.source || signal.origin || "Platform",
-            created_at: signal.created_at,
-            location: signal.location || signal.geo_location || null,
-            details: signal.details || signal.content || signal.raw_data || signal.body || null,
-            // Preserve additional fields for full context
-            status: signal.status,
-            assignee: signal.assignee || signal.assigned_to,
-            metadata: signal.metadata || signal.extra_data,
+            description: signal.description || signal.summary || signal.message || "",
+            severity: signal.severity || signal.priority || signal.level || "low",
+            category: signal.category || signal.type || signal.signal_type || "General",
+            source: signal.source || signal.origin || signal.source_system || "Platform",
+            created_at: signal.created_at || signal.timestamp,
+            location: signal.location || signal.geo_location || signal.area || null,
+            // Try multiple field names for details content
+            details: signal.details || signal.content || signal.body || signal.notes || 
+                     signal.raw_data || signal.full_description || signal.additional_info || null,
+            status: signal.status || signal.state,
+            assignee: signal.assignee || signal.assigned_to || signal.operator_id,
+            metadata: signal.metadata || signal.extra_data || signal.context,
             raw: signal, // Keep full raw signal for complete access
           })) as Signal[];
         }
