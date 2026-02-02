@@ -35,7 +35,9 @@ serve(async (req) => {
 
     // Create form data for OpenAI
     const openAIFormData = new FormData();
-    openAIFormData.append("file", audioFile, "audio.webm");
+    // Preserve the original filename/type from the client. Whisper accepts many audio formats
+    // (mp4/webm/wav/etc) and iOS Safari commonly records mp4.
+    openAIFormData.append("file", audioFile, audioFile.name || "audio");
     openAIFormData.append("model", "whisper-1");
     openAIFormData.append("language", "en");
     openAIFormData.append("response_format", "json");

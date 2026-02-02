@@ -243,15 +243,17 @@ export function useAegisChat() {
     loadConversations();
   };
 
-  const sendMessage = useCallback(async (input: string) => {
-    if (!input.trim() || isStreaming) return;
+  const sendMessage = useCallback(async (input: string): Promise<string | null> => {
+    if (!input.trim() || isStreaming) return null;
+
+    let finalAssistantContent: string | null = null;
 
     let convId = currentConversationId;
     
     // Create new conversation if none exists
     if (!convId) {
       convId = await createConversation();
-      if (!convId) return;
+      if (!convId) return null;
     }
 
     // Optimistically add user message
@@ -282,7 +284,7 @@ export function useAegisChat() {
         title: "Message not saved",
         description: e instanceof Error ? e.message : "Unable to save message to the platform",
       });
-      return;
+      return null;
     }
 
     // Update title if first message
@@ -400,6 +402,8 @@ export function useAegisChat() {
         }
       }
 
+      finalAssistantContent = assistantContent || null;
+
     } catch (error) {
       console.error("Chat error:", error);
       toast({
@@ -409,9 +413,12 @@ export function useAegisChat() {
       });
       // Remove the empty assistant message on error
       setMessages(prev => prev.filter(m => m.content !== ""));
+      finalAssistantContent = null;
     } finally {
       setIsStreaming(false);
     }
+
+    return finalAssistantContent;
   }, [currentConversationId, messages, isStreaming, toast, userId, operator]);
 
   const startNewConversation = useCallback(() => {

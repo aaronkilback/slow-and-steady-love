@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
+import { useWhisperSTT } from "@/hooks/useWhisperSTT";
+import { useOpenAITTS } from "@/hooks/useOpenAITTS";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -22,6 +24,12 @@ I'm your lead AI security agent, ready to assist with:
 How can I assist you today, Operator?`;
 
 type VoiceState = "idle" | "listening" | "processing" | "speaking";
+type VoiceTransport = "realtime" | "push_to_talk";
+
+function isIOSDevice() {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
 
 export function AegisChat() {
   const {
@@ -39,10 +47,17 @@ export function AegisChat() {
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceTransport, setVoiceTransport] = useState<VoiceTransport>("realtime");
+  const [voiceOverlayMessage, setVoiceOverlayMessage] = useState<string | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const voiceTransportRef = useRef<VoiceTransport>("realtime");
+  useEffect(() => {
+    voiceTransportRef.current = voiceTransport;
+  }, [voiceTransport]);
 
   // OpenAI Realtime API for voice
   const {
@@ -57,6 +72,7 @@ export function AegisChat() {
       setCurrentTranscript(text);
     },
     onAgentResponseComplete: (text) => {
+      if (voiceTransportRef.current !== "realtime") return;
       setAegisResponse(text);
       // Briefly show response then clear for next turn
       setTimeout(() => {
@@ -68,6 +84,7 @@ export function AegisChat() {
       console.error("[Voice] Error:", error);
     },
     onStatusChange: (status) => {
+      if (voiceTransportRef.current !== "realtime") return;
       // Map realtime status to voice state
       switch (status) {
         case "idle":
@@ -87,6 +104,82 @@ export function AegisChat() {
     },
   });
 
+  const realtimeStatusRef = useRef(realtimeStatus);
+  useEffect(() => {
+    realtimeStatusRef.current = realtimeStatus;
+  }, [realtimeStatus]);
+
+  const whisper = useWhisperSTT({
+    onError: (err) => {
+      console.error("[Voice][STT] Error:", err);
+      setVoiceOverlayMessage(err.message || "Microphone recording failed");
+    },
+  });
+
+  const {
+    speak,
+    stop: stopTTS,
+    isSpeaking: isTtsSpeaking,
+    isLoading: isTtsLoading,
+  } = useOpenAITTS({
+    onStart: () => {
+      if (voiceTransportRef.current === "push_to_talk") setVoiceState("speaking");
+    },
+    onEnd: () => {
+      if (voiceTransportRef.current === "push_to_talk") setVoiceState("idle");
+    },
+    onError: (err) => {
+      console.error("[Voice][TTS] Error:", err);
+      setVoiceOverlayMessage(err.message || "Audio playback failed");
+      if (voiceTransportRef.current === "push_to_talk") setVoiceState("idle");
+    },
+  });
+
+  const switchToPushToTalk = useCallback(() => {
+    setVoiceTransport("push_to_talk");
+    setVoiceOverlayMessage(
+      "Realtime voice is unavailable on this iOS network. Push-to-talk enabled."
+    );
+    disconnectRealtime();
+    setVoiceState("idle");
+  }, [disconnectRealtime]);
+
+  // iOS Safari frequently stalls WebRTC on certain networks. If realtime never gets off the ground,
+  // automatically fall back to push-to-talk so voice still works.
+  useEffect(() => {
+    if (!voiceModeOpen) return;
+    if (voiceTransport !== "realtime") return;
+    if (!isIOSDevice()) return;
+
+    const t = window.setTimeout(() => {
+      const s = realtimeStatusRef.current;
+      if (s === "idle" || s === "connecting") {
+        // Only auto-fallback if we have no explicit realtime error.
+        if (!realtimeError) switchToPushToTalk();
+      }
+    }, 7000);
+
+    return () => window.clearTimeout(t);
+  }, [voiceModeOpen, voiceTransport, realtimeError, switchToPushToTalk]);
+
+  // Drive overlay state from push-to-talk activity
+  useEffect(() => {
+    if (voiceTransport !== "push_to_talk") return;
+
+    if (whisper.isListening) {
+      setVoiceState("listening");
+      return;
+    }
+    if (whisper.isProcessing || isTtsLoading) {
+      setVoiceState("processing");
+      return;
+    }
+    if (isTtsSpeaking) {
+      setVoiceState("speaking");
+      return;
+    }
+  }, [voiceTransport, whisper.isListening, whisper.isProcessing, isTtsLoading, isTtsSpeaking]);
+
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
@@ -98,27 +191,65 @@ export function AegisChat() {
   // Handle closing voice mode
   const handleCloseVoiceMode = useCallback(() => {
     disconnectRealtime();
+    stopTTS();
+    whisper.cancelListening();
     setVoiceModeOpen(false);
     setVoiceState("idle");
+    setVoiceTransport("realtime");
+    setVoiceOverlayMessage(null);
     setCurrentTranscript("");
     setAegisResponse("");
-  }, [disconnectRealtime]);
+  }, [disconnectRealtime, stopTTS, whisper]);
 
   // Handle opening voice mode - connect to realtime API
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
     setAegisResponse("");
+    setVoiceOverlayMessage(null);
+    setVoiceTransport("realtime");
+    setVoiceState("processing");
     // Connect to OpenAI Realtime API
     connectRealtime();
   }, [connectRealtime]);
 
   // Handle stopping speech (not applicable with realtime API in same way)
   const handleStopSpeaking = useCallback(() => {
+    if (voiceTransportRef.current === "push_to_talk") {
+      stopTTS();
+      setVoiceState("idle");
+      return;
+    }
+
     // With realtime API, we can't easily interrupt mid-speech
     // Just update local state
     setVoiceState("listening");
-  }, []);
+  }, [stopTTS]);
+
+  const handlePTTStart = useCallback(async () => {
+    if (voiceTransportRef.current !== "push_to_talk") return;
+    if (whisper.isProcessing || isTtsLoading) return;
+    setVoiceOverlayMessage(null);
+    setAegisResponse("");
+    setCurrentTranscript("");
+    await whisper.startListening();
+  }, [isTtsLoading, whisper]);
+
+  const handlePTTEnd = useCallback(async () => {
+    if (voiceTransportRef.current !== "push_to_talk") return;
+    const transcript = await whisper.stopListening();
+    if (!transcript) return;
+
+    setCurrentTranscript(transcript);
+    setVoiceState("processing");
+
+    const assistantText = await sendMessage(transcript);
+    if (!assistantText) return;
+
+    setAegisResponse(assistantText);
+    // Speak with iOS-safe TTS (onyx voice via backend)
+    await speak(assistantText);
+  }, [sendMessage, speak, whisper]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -350,13 +481,17 @@ export function AegisChat() {
         isOpen={voiceModeOpen}
         voiceState={voiceState}
         isSupported={isSupported}
-        errorMessage={realtimeError}
+        transport={voiceTransport}
+        errorMessage={voiceOverlayMessage ?? realtimeError}
         interimTranscript=""
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
         onClose={handleCloseVoiceMode}
         onToggleListening={handleStopSpeaking}
         onStopSpeaking={handleStopSpeaking}
+        onPressToTalkStart={voiceTransport === "push_to_talk" ? handlePTTStart : undefined}
+        onPressToTalkEnd={voiceTransport === "push_to_talk" ? handlePTTEnd : undefined}
+        onSwitchToPushToTalk={switchToPushToTalk}
       />
     </div>
   );
