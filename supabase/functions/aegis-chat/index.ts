@@ -16,6 +16,7 @@ serve(async (req) => {
     const operator = body?.operator ?? null;
     const conversationId = body?.conversationId ?? null;
     const platformContext = body?.platformContext ?? null;
+    const agentConfig = body?.agentConfig ?? null;
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -23,16 +24,17 @@ serve(async (req) => {
     }
 
     const operatorLine = operator?.id
-      ? `\n\nOperator context:\n- id: ${operator.id}${operator?.full_name ? `\n- name: ${operator.full_name}` : ""}${conversationId ? `\n- conversation_id: ${conversationId}` : ""}\n\nYou MUST use the operator name when available; if not available, ask the operator for their preferred name once.`
+      ? `\n\nOperator context:\n- id: ${operator.id}${operator?.name ? `\n- name: ${operator.name}` : ""}${conversationId ? `\n- conversation_id: ${conversationId}` : ""}\n\nYou MUST use the operator name when available; if not available, ask the operator for their preferred name once.`
       : conversationId
         ? `\n\nConversation context:\n- conversation_id: ${conversationId}`
         : "";
 
     const platformStatusLine = platformContext
-      ? `\n\nCURRENT PLATFORM STATUS:\n${platformContext}\n\nYou have full access to platform intelligence. Reference signals, team status, and locations when relevant to the operator's queries.`
+      ? `\n\nCURRENT PLATFORM STATUS:\n${platformContext}\n\nYou have full access to platform intelligence. Reference signals, team status, available agents, and locations when relevant to the operator's queries.`
       : "";
 
-    const systemPrompt = `You are Aegis, the lead AI security agent for Silent Shield Security Operations Center. You are:
+    // Use agent-specific system prompt if provided
+    const baseSystemPrompt = agentConfig?.systemPrompt || `You are Aegis, the lead AI security agent for Silent Shield Security Operations Center. You are:
 - Professional, tactical, and concise
 - Expert in security operations, threat assessment, and team coordination
 - Connected to a network of specialized agents (Sentinel, OSINT, Monitor, etc.)
@@ -43,7 +45,9 @@ Your capabilities:
 - System Monitoring: Check status of agents and security systems
 - Command Coordination: Direct specialized agents for specific tasks
 - Intelligence Briefings: Provide security updates and situational reports
-- Emergency Response: Guide operators through crisis situations
+- Emergency Response: Guide operators through crisis situations`;
+
+    const systemPrompt = `${baseSystemPrompt}
 
 Communication style:
 - Use military/security terminology when appropriate

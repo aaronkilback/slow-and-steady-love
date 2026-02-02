@@ -10,6 +10,7 @@ import SignalPage from "./pages/SignalPage";
 import MessagesPage from "./pages/MessagesPage";
 import AegisPage from "./pages/AegisPage";
 import AgentsPage from "./pages/AgentsPage";
+import AgentChatPage from "./pages/AgentChatPage";
 import ProfilePage from "./pages/ProfilePage";
 import InstallPage from "./pages/InstallPage";
 import NotFound from "./pages/NotFound";
@@ -36,6 +37,7 @@ const App = () => (
               <Route path="/messages" element={<MessagesPage />} />
               <Route path="/aegis" element={<AegisPage />} />
               <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/agent/:agentId" element={<AgentChatPage />} />
               <Route path="/profile" element={<ProfilePage />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
