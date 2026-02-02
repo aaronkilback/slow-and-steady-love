@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
+import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,8 +9,6 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
-import { useWhisperSTT } from "@/hooks/useWhisperSTT";
-import { useOpenAITTS } from "@/hooks/useOpenAITTS";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -22,23 +20,6 @@ I'm your lead AI security agent, ready to assist with:
 - 📊 **Intelligence Briefings** — Get security updates and reports
 
 How can I assist you today, Operator?`;
-
-type VoiceState = "idle" | "listening" | "processing" | "speaking";
-type VoiceTransport = "realtime" | "push_to_talk";
-
-function isIOSDevice() {
-  if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
-}
-
-function isPWAStandalone() {
-  if (typeof window === "undefined") return false;
-  const navStandalone = Boolean((navigator as unknown as { standalone?: boolean }).standalone);
-  const mediaStandalone =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(display-mode: standalone)").matches;
-  return navStandalone || mediaStandalone;
-}
 
 export function AegisChat() {
   const {
@@ -55,35 +36,27 @@ export function AegisChat() {
 
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
-  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [voiceTransport, setVoiceTransport] = useState<VoiceTransport>("realtime");
-  const [voiceOverlayMessage, setVoiceOverlayMessage] = useState<string | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const voiceTransportRef = useRef<VoiceTransport>("realtime");
-  useEffect(() => {
-    voiceTransportRef.current = voiceTransport;
-  }, [voiceTransport]);
 
   // OpenAI Realtime API for voice
   const {
     status: realtimeStatus,
     isSupported,
     isAgentSpeaking,
+    isConnected,
     connect: connectRealtime,
     disconnect: disconnectRealtime,
-    error: realtimeError,
   } = useOpenAIRealtime({
     onTranscript: (text) => {
       setCurrentTranscript(text);
     },
     onAgentResponseComplete: (text) => {
-      if (voiceTransportRef.current !== "realtime") return;
       setAegisResponse(text);
-      // Briefly show response then clear for next turn
+      // Clear after a delay
       setTimeout(() => {
         setAegisResponse("");
         setCurrentTranscript("");
@@ -91,92 +64,16 @@ export function AegisChat() {
     },
     onError: (error) => {
       console.error("[Voice] Error:", error);
-      setVoiceOverlayMessage(error);
+      setVoiceError(error);
     },
+    agentContext: "You are AEGIS, the lead AI security agent for the Silent Shield platform. Assist the operator with security briefings, threat analysis, and system monitoring.",
   });
 
-  // Map realtime status + isAgentSpeaking to voice state for UI
-  useEffect(() => {
-    if (voiceTransportRef.current !== "realtime") return;
-    
-    if (realtimeStatus === "idle") {
-      setVoiceState("idle");
-    } else if (realtimeStatus === "connecting") {
-      setVoiceState("processing");
-    } else if (realtimeStatus === "connected") {
-      if (isAgentSpeaking) {
-        setVoiceState("speaking");
-      } else {
-        setVoiceState("listening");
-      }
-    }
-  }, [realtimeStatus, isAgentSpeaking]);
-
-  const realtimeStatusRef = useRef(realtimeStatus);
-  useEffect(() => {
-    realtimeStatusRef.current = realtimeStatus;
-  }, [realtimeStatus]);
-
-  const whisper = useWhisperSTT({
-    onError: (err) => {
-      console.error("[Voice][STT] Error:", err);
-      setVoiceOverlayMessage(err.message || "Microphone recording failed");
-    },
-  });
-
-  const {
-    speak,
-    stop: stopTTS,
-    isSpeaking: isTtsSpeaking,
-    isLoading: isTtsLoading,
-  } = useOpenAITTS({
-    onStart: () => {
-      if (voiceTransportRef.current === "push_to_talk") setVoiceState("speaking");
-    },
-    onEnd: () => {
-      if (voiceTransportRef.current === "push_to_talk") setVoiceState("idle");
-    },
-    onError: (err) => {
-      console.error("[Voice][TTS] Error:", err);
-      setVoiceOverlayMessage(err.message || "Audio playback failed");
-      if (voiceTransportRef.current === "push_to_talk") setVoiceState("idle");
-    },
-  });
-
-  const switchToPushToTalk = useCallback(() => {
-    setVoiceTransport("push_to_talk");
-    setVoiceOverlayMessage(null);
-    disconnectRealtime();
-    setVoiceState("idle");
-  }, [disconnectRealtime]);
-
-  // Handle realtime connection errors - offer PTT as fallback
-  useEffect(() => {
-    if (!voiceModeOpen) return;
-    if (voiceTransport !== "realtime") return;
-    if (!realtimeError) return;
-
-    // Show error but don't auto-switch - let user decide
-    setVoiceOverlayMessage(realtimeError);
-  }, [voiceModeOpen, voiceTransport, realtimeError]);
-
-  // Drive overlay state from push-to-talk activity
-  useEffect(() => {
-    if (voiceTransport !== "push_to_talk") return;
-
-    if (whisper.isListening) {
-      setVoiceState("listening");
-      return;
-    }
-    if (whisper.isProcessing || isTtsLoading) {
-      setVoiceState("processing");
-      return;
-    }
-    if (isTtsSpeaking) {
-      setVoiceState("speaking");
-      return;
-    }
-  }, [voiceTransport, whisper.isListening, whisper.isProcessing, isTtsLoading, isTtsSpeaking]);
+  // Map realtime status to voice state for UI
+  const voiceState = realtimeStatus === "idle" ? "idle" 
+    : realtimeStatus === "connecting" ? "processing"
+    : realtimeStatus === "speaking" ? "speaking"
+    : "listening";
 
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
@@ -186,74 +83,24 @@ export function AegisChat() {
     await sendMessage(message);
   }, [input, isStreaming, sendMessage]);
 
-  // Handle closing voice mode
-  const handleCloseVoiceMode = useCallback(() => {
-    disconnectRealtime();
-    stopTTS();
-    whisper.cancelListening();
-    setVoiceModeOpen(false);
-    setVoiceState("idle");
-    setVoiceTransport("realtime");
-    setVoiceOverlayMessage(null);
-    setCurrentTranscript("");
-    setAegisResponse("");
-  }, [disconnectRealtime, stopTTS, whisper]);
-
-  // Handle opening voice mode - connect to realtime API
-  // CRITICAL: connectRealtime() MUST be called synchronously from this click handler
-  // for iOS PWA to properly authorize microphone access.
+  // Handle opening voice mode - CRITICAL: connect() called directly from click handler
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
     setAegisResponse("");
-    setVoiceOverlayMessage(null);
-
-    // Always attempt realtime first - the hook now handles iOS-specific
-    // AudioContext resume and optimized audio constraints
-    setVoiceTransport("realtime");
-    setVoiceState("processing");
-    
-    // Connect synchronously from user gesture (critical for iOS PWA)
+    setVoiceError(null);
+    // CRITICAL: This MUST be called directly from the click handler for iOS PWA
     connectRealtime();
   }, [connectRealtime]);
 
-  // Handle stopping speech (not applicable with realtime API in same way)
-  const handleStopSpeaking = useCallback(() => {
-    if (voiceTransportRef.current === "push_to_talk") {
-      stopTTS();
-      setVoiceState("idle");
-      return;
-    }
-
-    // With realtime API, we can't easily interrupt mid-speech
-    // Just update local state
-    setVoiceState("listening");
-  }, [stopTTS]);
-
-  const handlePTTStart = useCallback(async () => {
-    if (voiceTransportRef.current !== "push_to_talk") return;
-    if (whisper.isProcessing || isTtsLoading) return;
-    setVoiceOverlayMessage(null);
-    setAegisResponse("");
+  // Handle closing voice mode
+  const handleCloseVoiceMode = useCallback(() => {
+    disconnectRealtime();
+    setVoiceModeOpen(false);
+    setVoiceError(null);
     setCurrentTranscript("");
-    await whisper.startListening();
-  }, [isTtsLoading, whisper]);
-
-  const handlePTTEnd = useCallback(async () => {
-    if (voiceTransportRef.current !== "push_to_talk") return;
-    const transcript = await whisper.stopListening();
-    if (!transcript) return;
-
-    setCurrentTranscript(transcript);
-    setVoiceState("processing");
-
-    const assistantText = await sendMessage(transcript);
-    if (!assistantText) return;
-
-    setAegisResponse(assistantText);
-    // Speak with iOS-safe TTS (onyx voice via backend)
-    await speak(assistantText);
-  }, [sendMessage, speak, whisper]);
+    setAegisResponse("");
+  }, [disconnectRealtime]);
 
   // Scroll to bottom helper
   const scrollToBottom = useCallback(() => {
@@ -456,7 +303,7 @@ export function AegisChat() {
             onClick={handleOpenVoiceMode}
             disabled={!isSupported}
             className="shrink-0 transition-all hover:text-primary"
-            title={!isSupported ? "Speech not supported" : "Open voice mode"}
+            title={!isSupported ? "Voice not supported" : "Open voice mode"}
           >
             <Mic className="h-5 w-5" />
           </Button>
@@ -485,17 +332,13 @@ export function AegisChat() {
         isOpen={voiceModeOpen}
         voiceState={voiceState}
         isSupported={isSupported}
-        transport={voiceTransport}
-        errorMessage={voiceOverlayMessage ?? realtimeError}
+        errorMessage={voiceError}
         interimTranscript=""
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
         onClose={handleCloseVoiceMode}
-        onToggleListening={handleStopSpeaking}
-        onStopSpeaking={handleStopSpeaking}
-        onPressToTalkStart={voiceTransport === "push_to_talk" ? handlePTTStart : undefined}
-        onPressToTalkEnd={voiceTransport === "push_to_talk" ? handlePTTEnd : undefined}
-        onSwitchToPushToTalk={switchToPushToTalk}
+        onToggleListening={disconnectRealtime}
+        onStopSpeaking={disconnectRealtime}
       />
     </div>
   );

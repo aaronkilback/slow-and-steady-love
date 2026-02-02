@@ -1,6 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, X, Shield, Volume2, VolumeX } from "lucide-react";
-import type React from "react";
+import { Mic, X, Shield, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -11,16 +10,12 @@ interface VoiceModeProps {
   voiceState: VoiceState;
   isSupported: boolean;
   errorMessage?: string | null;
-  transport?: "realtime" | "push_to_talk";
   interimTranscript: string;
   currentTranscript: string;
   aegisResponse: string;
   onClose: () => void;
   onToggleListening: () => void;
   onStopSpeaking: () => void;
-  onPressToTalkStart?: () => void;
-  onPressToTalkEnd?: () => void;
-  onSwitchToPushToTalk?: () => void;
 }
 
 export function VoiceMode({
@@ -28,16 +23,11 @@ export function VoiceMode({
   voiceState,
   isSupported,
   errorMessage,
-  transport = "realtime",
   interimTranscript,
   currentTranscript,
   aegisResponse,
   onClose,
-  onToggleListening,
   onStopSpeaking,
-  onPressToTalkStart,
-  onPressToTalkEnd,
-  onSwitchToPushToTalk,
 }: VoiceModeProps) {
   const isListening = voiceState === "listening";
   const isProcessing = voiceState === "processing";
@@ -47,24 +37,11 @@ export function VoiceMode({
     if (!isSupported) return "Voice not supported in this browser";
     if (errorMessage) return errorMessage;
 
-    if (transport === "push_to_talk") {
-      switch (voiceState) {
-        case "listening":
-          return "Recording...";
-        case "processing":
-          return "Processing...";
-        case "speaking":
-          return "Aegis is speaking...";
-        default:
-          return "Hold to talk";
-      }
-    }
-
     switch (voiceState) {
       case "listening":
         return "Listening...";
       case "processing":
-        return "Aegis is thinking...";
+        return "Connecting...";
       case "speaking":
         return "Aegis is speaking...";
       default:
@@ -73,25 +50,7 @@ export function VoiceMode({
   };
 
   const handleCenterButtonClick = () => {
-    // Realtime mode: tap only to stop Aegis speech (best-effort)
-    if (transport === "realtime" && isSpeaking) onStopSpeaking();
-  };
-
-  const handlePressStart = (e: React.PointerEvent | React.TouchEvent) => {
-    if (transport !== "push_to_talk") return;
-    if (!onPressToTalkStart || isProcessing || !isSupported) return;
-    // Prevent scroll/gesture conflicts on iOS
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (e as any).preventDefault?.();
-    onPressToTalkStart();
-  };
-
-  const handlePressEnd = (e: React.PointerEvent | React.TouchEvent) => {
-    if (transport !== "push_to_talk") return;
-    if (!onPressToTalkEnd || isProcessing || !isSupported) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (e as any).preventDefault?.();
-    onPressToTalkEnd();
+    if (isSpeaking) onStopSpeaking();
   };
 
   return (
@@ -208,15 +167,9 @@ export function VoiceMode({
               </>
             )}
 
-            {/* Center orb - visual indicator, tap to skip speech */}
+            {/* Center orb - visual indicator, tap to stop speech */}
             <motion.button
               onClick={handleCenterButtonClick}
-              onPointerDown={handlePressStart}
-              onPointerUp={handlePressEnd}
-              onPointerCancel={handlePressEnd}
-              onPointerLeave={isListening ? handlePressEnd : undefined}
-              onTouchStart={handlePressStart}
-              onTouchEnd={handlePressEnd}
               disabled={!isSupported || isProcessing}
               className={cn(
                 "relative z-10 flex h-40 w-40 items-center justify-center rounded-full transition-all",
@@ -225,8 +178,7 @@ export function VoiceMode({
                 "shadow-[0_0_60px_-10px_hsl(var(--primary))]",
                 (isListening || isSpeaking) && "shadow-[0_0_80px_-5px_hsl(var(--primary))]",
                 (!isSupported || isProcessing) && "opacity-50 cursor-not-allowed",
-                transport === "realtime" && isSpeaking && "cursor-pointer",
-                transport === "push_to_talk" && !isProcessing && "cursor-pointer"
+                isSpeaking && "cursor-pointer"
               )}
               whileHover={isSpeaking ? { scale: 1.05 } : {}}
               whileTap={isSpeaking ? { scale: 0.95 } : {}}
@@ -283,12 +235,6 @@ export function VoiceMode({
             >
               {getStatusText()}
             </motion.p>
-
-            {transport === "push_to_talk" && !errorMessage && (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Press and hold the orb to record.
-              </p>
-            )}
           </motion.div>
 
           {/* Transcript displays */}
