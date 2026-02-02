@@ -97,9 +97,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Starting connection...');
       setStatus('connecting');
 
-      // Request Wake Lock to keep screen awake during voice session (iOS + Android)
-      await requestWakeLock();
-
       // CRITICAL (iOS PWA): Initiate microphone capture immediately from the click stack.
       // Do this BEFORE any network awaits to avoid losing the user-gesture requirement.
       console.log('[Realtime] Requesting microphone...');
@@ -114,6 +111,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       });
       mediaStreamRef.current = stream;
       console.log('[Realtime] Microphone access granted');
+
+      // Request Wake Lock AFTER mic is acquired (iOS user-gesture requirement)
+      requestWakeLock().catch(() => {});
       
       // Step 1: Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
@@ -239,6 +239,29 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      // IMPORTANT (mobile): wait for ICE candidates to be gathered so the SDP is usable.
+      // Without this, some iOS networks get stuck in a "connected/listening" state.
+      const waitForIceGatheringComplete = async () => {
+        if (pc.iceGatheringState === 'complete') return;
+        await new Promise<void>((resolve) => {
+          const onStateChange = () => {
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', onStateChange);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', onStateChange);
+          // Safety timeout: proceed anyway after 2.5s
+          setTimeout(() => {
+            pc.removeEventListener('icegatheringstatechange', onStateChange);
+            resolve();
+          }, 2500);
+        });
+      };
+
+      await waitForIceGatheringComplete();
+      const sdpToSend = pc.localDescription?.sdp ?? offer.sdp;
+
       // Step 8: Send offer to OpenAI and get answer
       console.log('[Realtime] Sending offer to OpenAI...');
       const sdpResp = await fetch(
@@ -249,7 +272,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             'Authorization': `Bearer ${data.client_secret.value}`, 
             'Content-Type': 'application/sdp' 
           }, 
-          body: offer.sdp 
+          body: sdpToSend 
         }
       );
       
