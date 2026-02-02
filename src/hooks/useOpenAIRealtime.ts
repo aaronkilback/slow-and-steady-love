@@ -1,323 +1,225 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
-
-type RealtimeStatus = "idle" | "connecting" | "connected";
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface UseOpenAIRealtimeOptions {
-  agentContext?: string;
-  onTranscript?: (text: string, isFinal: boolean) => void;
-  onAgentResponse?: (delta: string) => void;
-  onAgentResponseComplete?: (fullText: string) => void;
+  onTranscript?: (text: string) => void;
+  onAgentResponseComplete?: (text: string) => void;
   onError?: (error: string) => void;
-  onStatusChange?: (status: RealtimeStatus) => void;
+  agentContext?: string;
 }
 
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
-  const [status, setStatus] = useState<RealtimeStatus>("idle");
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'speaking'>('idle');
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
-  const [isSupported, setIsSupported] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
-  const responseTextRef = useRef("");
-
-  // Check WebRTC support
-  useEffect(() => {
-    const supported = !!(
-      window.RTCPeerConnection &&
-      navigator.mediaDevices &&
-      navigator.mediaDevices.getUserMedia
-    );
-    setIsSupported(supported);
-  }, []);
-
-  const updateStatus = useCallback((newStatus: RealtimeStatus) => {
-    setStatus(newStatus);
-    options.onStatusChange?.(newStatus);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const optionsRef = useRef(options);
+  
+  useEffect(() => { 
+    optionsRef.current = options; 
   }, [options]);
 
   const disconnect = useCallback(() => {
-    // Stop all tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    // Close data channel
+    console.log('[Realtime] Disconnecting...');
+    
     if (dcRef.current) {
       dcRef.current.close();
       dcRef.current = null;
     }
-
-    // Close peer connection
+    
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
-
-    // Clean up audio element
-    if (audioElRef.current) {
-      audioElRef.current.srcObject = null;
-      audioElRef.current.remove();
-      audioElRef.current = null;
+    
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
     }
-
-    updateStatus("idle");
+    
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.srcObject = null;
+      audioElementRef.current.remove();
+      audioElementRef.current = null;
+    }
+    
     setIsAgentSpeaking(false);
-    setError(null);
-    responseTextRef.current = "";
-    console.log("[Realtime] Disconnected");
-  }, [updateStatus]);
+    setStatus('idle');
+  }, []);
 
   /**
-   * CRITICAL: This function MUST be called directly from a user gesture (click/tap handler).
+   * CRITICAL: This function MUST be called directly from a button onClick handler.
    * iOS PWA mode requires getUserMedia to be initiated synchronously from user interaction.
    * Do NOT call this from useEffect, setTimeout, or async callbacks.
    */
   const connect = useCallback(async () => {
-    if (!isSupported) {
-      const msg = "WebRTC not supported in this browser";
-      setError(msg);
-      options.onError?.(msg);
-      return;
-    }
-
-    // Clean up any existing connection
-    if (pcRef.current || dcRef.current || streamRef.current) {
-      disconnect();
-    }
-
     try {
-      updateStatus("connecting");
-      setError(null);
-      responseTextRef.current = "";
-
-      // STEP 1: iOS PWA fix - Create AudioContext on user gesture
-      if (!audioContextRef.current) {
-        const AudioContextClass = window.AudioContext || 
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (AudioContextClass) {
-          audioContextRef.current = new AudioContextClass({ sampleRate: 24000 });
-        }
-      }
-
-      // Resume AudioContext if suspended (iOS requirement)
-      if (audioContextRef.current?.state === "suspended") {
-        await audioContextRef.current.resume();
-      }
-
-      // STEP 2: Get microphone with iOS-compatible constraints
-      // This MUST happen synchronously from user gesture
-      console.log("[Realtime] Requesting microphone access");
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 24000,
-          },
-        });
-      } catch (micError) {
-        console.error("[Realtime] Microphone access denied:", micError);
-        const micMsg = micError instanceof Error && micError.name === "NotAllowedError"
-          ? "Microphone access denied. Check Settings > Safari > Microphone."
-          : "Microphone access failed. Try Push-to-Talk.";
-        setError(micMsg);
-        options.onError?.(micMsg);
-        updateStatus("idle");
-        return;
-      }
-      streamRef.current = stream;
-      console.log("[Realtime] Microphone access granted");
-
-      // STEP 3: Get ephemeral token from edge function
-      console.log("[Realtime] Fetching session token");
-      const { data, error: tokenError } = await supabase.functions.invoke("openai-realtime-token", {
-        body: {
-          instructions: options.agentContext || `You are Aegis, lead AI security agent for Silent Shield Security Intelligence Platform.
-
-VOICE STYLE:
-- Deep, authoritative male voice with commanding presence
-- Measured, deliberate pacing—never rushed
-- Clinical precision with strategic undertones
-- Speaks like a senior intelligence officer delivering a classified briefing
-- Zero filler words—every phrase carries weight
-- Calm confidence, not aggressive
-- Keep answers tight: 1-3 sentences by default unless detail is requested
-- Never sound robotic
-
-ROLE:
-- Lead AI Security Agent for the Fortress platform
-- Coordinates specialized agents for security tasks
-- Provides threat analysis and intelligence briefings
-- Monitors system status and coordinates command operations`,
-        },
+      console.log('[Realtime] Starting connection...');
+      setStatus('connecting');
+      
+      // Step 1: Get ephemeral token from edge function
+      const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
+        body: { agentContext: optionsRef.current.agentContext } 
       });
-
-      if (tokenError || !data?.client_secret?.value) {
-        throw new Error(tokenError?.message || "Failed to get session token");
+      
+      if (error || !data?.client_secret) {
+        throw new Error(error?.message || 'Failed to get session token');
       }
+      
+      console.log('[Realtime] Got session token');
 
-      console.log("[Realtime] Session token received");
-
-      // STEP 4: Create WebRTC peer connection
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-        ],
-      });
+      // Step 2: Create RTCPeerConnection
+      const pc = new RTCPeerConnection();
       pcRef.current = pc;
 
-      // Add microphone track to peer connection
-      stream.getAudioTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-      });
-
-      // STEP 5: Handle remote audio from OpenAI
-      const audioEl = document.createElement("audio");
+      // Step 3: Create audio element for playback (iOS PWA compatible)
+      const audioEl = document.createElement('audio');
       audioEl.autoplay = true;
-      audioEl.setAttribute("playsinline", "true");
-      audioEl.setAttribute("webkit-playsinline", "true");
-      audioElRef.current = audioEl;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (audioEl as any).playsInline = true;
+      audioEl.setAttribute('playsinline', 'true');
+      audioEl.setAttribute('webkit-playsinline', 'true');
+      audioElementRef.current = audioEl;
+      document.body.appendChild(audioEl);
 
+      // Step 4: Handle incoming audio track
       pc.ontrack = (e) => {
-        console.log("[Realtime] Received audio track");
+        console.log('[Realtime] Received audio track');
         audioEl.srcObject = e.streams[0];
-        audioEl.play().catch((err) => {
-          console.warn("[Realtime] Audio autoplay blocked:", err);
+        audioEl.play().catch(() => {
+          // iOS might block autoplay, add touch listener as fallback
+          window.addEventListener('pointerdown', () => audioEl.play(), { once: true });
         });
       };
 
-      // STEP 6: Create data channel for events
-      const dc = pc.createDataChannel("oai-events");
+      // Step 5: Get microphone (MUST be called from user gesture for iOS PWA)
+      console.log('[Realtime] Requesting microphone...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          sampleRate: 24000, 
+          channelCount: 1, 
+          echoCancellation: true, 
+          noiseSuppression: true 
+        } 
+      });
+      mediaStreamRef.current = stream;
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      console.log('[Realtime] Microphone access granted');
+
+      // Step 6: Create data channel for events
+      const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
-
+      
       dc.onopen = () => {
-        console.log("[Realtime] Data channel open - connected!");
-        updateStatus("connected");
+        console.log('[Realtime] Data channel open - connected!');
+        setStatus('connected');
+        
+        // Send initial greeting request
+        dc.send(JSON.stringify({ 
+          type: 'response.create', 
+          response: { 
+            modalities: ['audio', 'text'], 
+            instructions: 'Greet the user briefly as AEGIS, their AI security agent.' 
+          } 
+        }));
       };
-
+      
       dc.onmessage = (e) => {
         try {
-          const event = JSON.parse(e.data);
-
-          switch (event.type) {
-            case "conversation.item.input_audio_transcription.completed":
-              console.log("[Realtime] User transcript:", event.transcript);
-              options.onTranscript?.(event.transcript || "", true);
-              break;
-
-            case "response.audio_transcript.delta":
-              responseTextRef.current += event.delta || "";
-              options.onAgentResponse?.(event.delta || "");
-              break;
-
-            case "response.audio.started":
-              console.log("[Realtime] Agent started speaking");
-              setIsAgentSpeaking(true);
-              break;
-
-            case "response.audio.done":
-            case "response.done":
-              console.log("[Realtime] Agent finished speaking");
-              setIsAgentSpeaking(false);
-              if (responseTextRef.current) {
-                options.onAgentResponseComplete?.(responseTextRef.current);
-                responseTextRef.current = "";
-              }
-              break;
-
-            case "error":
-              console.error("[Realtime] API error:", event.error);
-              setError(event.error?.message || "Realtime error");
-              options.onError?.(event.error?.message || "Realtime error");
-              break;
+          const d = JSON.parse(e.data);
+          
+          // User speech transcription
+          if (d.type === 'conversation.item.input_audio_transcription.completed') {
+            console.log('[Realtime] User said:', d.transcript);
+            optionsRef.current.onTranscript?.(d.transcript);
+          }
+          
+          // Agent response complete
+          if (d.type === 'response.audio_transcript.done') {
+            console.log('[Realtime] Agent said:', d.transcript);
+            optionsRef.current.onAgentResponseComplete?.(d.transcript || '');
+          }
+          
+          // Agent is speaking
+          if (d.type === 'response.audio.delta') {
+            setIsAgentSpeaking(true);
+            setStatus('speaking');
+          }
+          
+          // Agent finished speaking
+          if (d.type === 'response.done') {
+            setIsAgentSpeaking(false);
+            setStatus('connected');
+          }
+          
+          // Error from API
+          if (d.type === 'error') {
+            console.error('[Realtime] API error:', d.error);
+            optionsRef.current.onError?.(d.error?.message || 'Realtime error');
           }
         } catch (err) {
-          console.error("[Realtime] Message parse error:", err);
+          console.error('[Realtime] Message parse error:', err);
         }
       };
-
+      
       dc.onerror = (err) => {
-        console.error("[Realtime] Data channel error:", err);
-        setError("Connection error");
-        options.onError?.("Connection error");
+        console.error('[Realtime] Data channel error:', err);
       };
-
+      
       dc.onclose = () => {
-        console.log("[Realtime] Data channel closed");
-        updateStatus("idle");
+        console.log('[Realtime] Data channel closed');
       };
 
-      pc.onconnectionstatechange = () => {
-        console.log("[Realtime] Connection state:", pc.connectionState);
-        if (pc.connectionState === "failed") {
-          setError("Connection failed");
-          options.onError?.("Connection failed");
-          disconnect();
-        }
-      };
-
-      // STEP 7: Create offer and set local description
-      console.log("[Realtime] Creating WebRTC offer");
+      // Step 7: Create and send SDP offer
+      console.log('[Realtime] Creating WebRTC offer...');
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // STEP 8: Send offer to OpenAI and get answer (client-side SDP handshake)
-      console.log("[Realtime] Sending offer to OpenAI");
-      const sdpResponse = await fetch(
-        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${data.client_secret.value}`,
-            "Content-Type": "application/sdp",
-          },
-          body: offer.sdp,
+      // Step 8: Send offer to OpenAI and get answer
+      console.log('[Realtime] Sending offer to OpenAI...');
+      const sdpResp = await fetch(
+        'https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
+        { 
+          method: 'POST', 
+          headers: { 
+            'Authorization': `Bearer ${data.client_secret.value}`, 
+            'Content-Type': 'application/sdp' 
+          }, 
+          body: offer.sdp 
         }
       );
-
-      if (!sdpResponse.ok) {
-        const errorText = await sdpResponse.text();
-        throw new Error(`OpenAI SDP error: ${sdpResponse.status} - ${errorText}`);
+      
+      if (!sdpResp.ok) {
+        const errorText = await sdpResp.text();
+        throw new Error(`WebRTC handshake failed: ${sdpResp.status} - ${errorText}`);
       }
-
-      const answerSdp = await sdpResponse.text();
-      console.log("[Realtime] Received SDP answer, setting remote description");
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-      console.log("[Realtime] WebRTC connection established successfully");
-    } catch (err) {
-      console.error("[Realtime] Connect error:", err);
-      const msg = err instanceof Error ? err.message : "Connection failed";
-      setError(msg);
-      options.onError?.(msg);
-      updateStatus("idle");
+      
+      await pc.setRemoteDescription({ type: 'answer', sdp: await sdpResp.text() });
+      console.log('[Realtime] WebRTC connection established!');
+      
+    } catch (e) {
+      console.error('[Realtime] Connection error:', e);
+      optionsRef.current.onError?.(e instanceof Error ? e.message : 'Connection failed');
+      setStatus('idle');
+      disconnect();
     }
-  }, [disconnect, isSupported, options, updateStatus]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (pcRef.current) {
-        disconnect();
-      }
-    };
   }, [disconnect]);
 
-  return {
-    status,
-    isSupported,
-    isConnected: status === "connected",
-    isAgentSpeaking,
-    error,
-    connect,
-    disconnect,
+  // Cleanup on unmount
+  useEffect(() => () => disconnect(), [disconnect]);
+  
+  return { 
+    status, 
+    isAgentSpeaking, 
+    connect, 
+    disconnect, 
+    isConnected: status === 'connected' || status === 'speaking',
+    isSupported: typeof navigator !== 'undefined' && 
+                 !!navigator.mediaDevices?.getUserMedia && 
+                 !!window.RTCPeerConnection
   };
 }
