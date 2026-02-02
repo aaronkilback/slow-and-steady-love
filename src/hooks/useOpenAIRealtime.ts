@@ -15,6 +15,7 @@ interface UseOpenAIRealtimeOptions {
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<RealtimeStatus>("idle");
   const [isSupported, setIsSupported] = useState(true);
+  const [lastError, setLastError] = useState<string | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -98,23 +99,30 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     }
 
     updateStatus("idle");
+    setLastError(null);
     console.log("[Realtime] Disconnected");
   }, [updateStatus]);
 
   const connect = useCallback(async () => {
     if (!isSupported) {
-      options.onError?.("WebRTC not supported in this browser");
+      const msg = "WebRTC not supported in this browser";
+      setLastError(msg);
+      options.onError?.(msg);
       return;
     }
 
     try {
       updateStatus("connecting");
+      setLastError(null);
       console.log("[Realtime] connect() starting");
 
       // We do the SDP handshake via backend function to avoid client-side CORS/network blockers
       // that commonly cause "Starting..." stalls in production.
 
-      const pc = new RTCPeerConnection();
+      // STUN is important for NAT traversal; without it, many real-world networks stall at "Starting..."
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
       pcRef.current = pc;
 
       // Audio playback element
@@ -146,12 +154,21 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
       pc.onconnectionstatechange = () => {
         console.log("[Realtime] connectionState:", pc.connectionState);
+        if (pc.connectionState === "failed") {
+          const msg = "Connection failed";
+          setLastError(msg);
+          options.onError?.(msg);
+          disconnect();
+        }
       };
       pc.oniceconnectionstatechange = () => {
         console.log("[Realtime] iceConnectionState:", pc.iceConnectionState);
       };
       pc.onicegatheringstatechange = () => {
         console.log("[Realtime] iceGatheringState:", pc.iceGatheringState);
+      };
+      pc.onicecandidateerror = (ev) => {
+        console.warn("[Realtime] ICE candidate error", ev);
       };
 
       dc.onopen = () => {
@@ -212,6 +229,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
               
             case "error":
               console.error("[Realtime] Error:", message.error);
+              setLastError(message.error?.message || "Realtime error");
               options.onError?.(message.error?.message || "Realtime error");
               break;
           }
@@ -222,7 +240,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
       dc.onerror = (err) => {
         console.error("[Realtime] Data channel error:", err);
-        options.onError?.("Connection error");
+        const msg = "Connection error";
+        setLastError(msg);
+        options.onError?.(msg);
       };
 
       dc.onclose = () => {
@@ -252,7 +272,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
       if (error || !data?.answer_sdp) {
         console.error("[Realtime] Handshake error:", error || data);
-        options.onError?.(error?.message || "Failed to establish connection");
+        const msg = error?.message || "Failed to establish connection";
+        setLastError(msg);
+        options.onError?.(msg);
         disconnect();
         return;
       }
@@ -263,7 +285,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log("[Realtime] Connection established");
     } catch (err) {
       console.error("[Realtime] Connect error:", err);
-      options.onError?.(err instanceof Error ? err.message : "Connection failed");
+      const msg = err instanceof Error ? err.message : "Connection failed";
+      setLastError(msg);
+      options.onError?.(msg);
       updateStatus("idle");
     }
   }, [disconnect, isSupported, options, updateStatus, waitForIceGatheringComplete]);
@@ -280,6 +304,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   return {
     status,
     isSupported,
+    error: lastError,
     connect,
     disconnect,
     isConnected: status !== "idle" && status !== "connecting",

@@ -9,6 +9,7 @@ interface VoiceModeProps {
   isOpen: boolean;
   voiceState: VoiceState;
   isSupported: boolean;
+  errorMessage?: string | null;
   interimTranscript: string;
   currentTranscript: string;
   aegisResponse: string;
@@ -21,6 +22,7 @@ export function VoiceMode({
   isOpen,
   voiceState,
   isSupported,
+  errorMessage,
   interimTranscript,
   currentTranscript,
   aegisResponse,
@@ -34,6 +36,7 @@ export function VoiceMode({
 
   const getStatusText = () => {
     if (!isSupported) return "Voice not supported in this browser";
+    if (errorMessage) return errorMessage;
     switch (voiceState) {
       case "listening":
         return "Listening...";

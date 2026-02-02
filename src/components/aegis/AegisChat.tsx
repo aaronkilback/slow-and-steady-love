@@ -50,6 +50,7 @@ export function AegisChat() {
     isSupported,
     connect: connectRealtime,
     disconnect: disconnectRealtime,
+    error: realtimeError,
   } = useOpenAIRealtime({
     agentContext: "You are in voice mode, assisting with security operations.",
     onTranscript: (text) => {
@@ -349,6 +350,7 @@ export function AegisChat() {
         isOpen={voiceModeOpen}
         voiceState={voiceState}
         isSupported={isSupported}
+        errorMessage={realtimeError}
         interimTranscript=""
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
