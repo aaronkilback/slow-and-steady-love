@@ -301,7 +301,7 @@ export function VoiceMode({
 
             {/* Aegis response preview */}
             <AnimatePresence mode="wait">
-              {aegisResponse && isSpeaking && (
+              {aegisResponse && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
