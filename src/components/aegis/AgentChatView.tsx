@@ -113,10 +113,8 @@ You have full access to platform intelligence. Reference signals, team status, a
     agentContext: voiceContext,
   });
 
-  const voiceState = realtimeStatus === "idle" ? "idle" 
-    : realtimeStatus === "connecting" ? "processing"
-    : realtimeStatus === "speaking" ? "speaking"
-    : "listening";
+  // Pass realtime status directly to VoiceMode (same type now)
+  const voiceState = realtimeStatus;
 
   // Generate platform summary for text chat
   const platformSummary = useMemo(() => 
