@@ -251,19 +251,12 @@ export function AgentDirectory() {
   const aiAgents = mergedAgents;
 
   const handleAgentChat = (agent: Agent) => {
-    if (agent.id === "aegis") {
-      // Navigate directly to Aegis
-      navigate("/");
-    } else {
-      // Navigate to Aegis with agent context - Aegis will handle routing to the agent
-      toast({
-        title: `Connecting to ${agent.name}`,
-        description: "Opening chat with agent...",
-      });
-      // Store selected agent in session for Aegis to pick up
-      sessionStorage.setItem("selectedAgent", JSON.stringify(agent));
-      navigate("/");
-    }
+    toast({
+      title: `Connecting to ${agent.name}`,
+      description: "Opening chat with agent...",
+    });
+    // Navigate to agent-specific chat page
+    navigate(`/agent/${agent.id}`);
   };
 
   const handleOperatorChat = (operator: Operator) => {

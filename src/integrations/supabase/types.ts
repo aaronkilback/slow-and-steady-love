@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       aegis_conversations: {
         Row: {
+          agent_id: string | null
           created_at: string
           id: string
           title: string | null
@@ -23,6 +24,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          agent_id?: string | null
           created_at?: string
           id?: string
           title?: string | null
@@ -30,6 +32,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          agent_id?: string | null
           created_at?: string
           id?: string
           title?: string | null
@@ -40,6 +43,7 @@ export type Database = {
       }
       aegis_messages: {
         Row: {
+          agent_id: string | null
           content: string
           conversation_id: string
           created_at: string
@@ -47,6 +51,7 @@ export type Database = {
           role: string
         }
         Insert: {
+          agent_id?: string | null
           content: string
           conversation_id: string
           created_at?: string
@@ -54,6 +59,7 @@ export type Database = {
           role: string
         }
         Update: {
+          agent_id?: string | null
           content?: string
           conversation_id?: string
           created_at?: string
