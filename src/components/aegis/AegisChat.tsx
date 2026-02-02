@@ -31,6 +31,16 @@ function isIOSDevice() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
+function isStandaloneDisplayMode() {
+  if (typeof window === "undefined") return false;
+  // iOS Safari (Home Screen) exposes navigator.standalone; modern PWAs expose display-mode.
+  const navStandalone = Boolean((navigator as unknown as { standalone?: boolean }).standalone);
+  const mediaStandalone =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(display-mode: standalone)").matches;
+  return navStandalone || mediaStandalone;
+}
+
 export function AegisChat() {
   const {
     conversations,
@@ -207,6 +217,17 @@ export function AegisChat() {
     setCurrentTranscript("");
     setAegisResponse("");
     setVoiceOverlayMessage(null);
+    // iOS Home Screen web apps are prone to WebRTC audio session failures ("object is invalid state").
+    // In that mode, force the reliable Push-to-Talk pipeline.
+    if (isIOSDevice() && isStandaloneDisplayMode()) {
+      setVoiceTransport("push_to_talk");
+      setVoiceState("idle");
+      setVoiceOverlayMessage(
+        "Realtime voice is unstable in iOS Home Screen mode. Push-to-talk enabled."
+      );
+      return;
+    }
+
     setVoiceTransport("realtime");
     setVoiceState("processing");
     // Connect to OpenAI Realtime API
