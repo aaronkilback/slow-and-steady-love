@@ -104,6 +104,12 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         setTranscript(transcriptText);
         optionsRef.current.onTranscript?.(transcriptText, true);
         break;
+      case 'conversation.item.input_audio_transcription.failed': {
+        const err = (event as any).error;
+        console.error('[Voice] Transcription failed:', err);
+        optionsRef.current.onError?.(err?.message || 'Transcription failed.');
+        break;
+      }
       case 'response.function_call_arguments.done':
         const callId = ((event as any).call_id || (event as any).item?.call_id) as string;
         const name = ((event as any).name || (event as any).item?.name) as string;
@@ -128,6 +134,17 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         break;
       case 'response.audio.done':
       case 'response.done':
+        if (event.type === 'response.done') {
+          const response = (event as any).response;
+          if (response?.status === 'failed') {
+            const msg =
+              response?.status_details?.error?.message ||
+              response?.status_details?.error?.code ||
+              'Voice response failed.';
+            console.error('[Voice] Response failed:', response?.status_details?.error);
+            optionsRef.current.onError?.(msg);
+          }
+        }
         setIsAgentSpeaking(false);
         updateStatus('connected');
         if (event.type === 'response.done') setAgentResponse('');
