@@ -60,18 +60,16 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       if (!dc || dc.readyState !== 'open') return;
 
       if (statusRef.current === 'listening') {
-        console.warn('[Voice] Watchdog: stuck in listening — forcing commit + response');
+        console.warn('[Voice] Watchdog: stuck in listening — forcing response.create');
         updateStatus('thinking');
-        try {
-          dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-        } catch {
-          // ignore
-        }
-        try {
-          dc.send(JSON.stringify({ type: 'response.create' }));
-        } catch {
-          // ignore
-        }
+        // NOTE: For WebRTC audio tracks, sending input_audio_buffer.commit can error with
+        // input_audio_buffer_commit_empty and yield a no-op response. Only request a response.
+        dc.send(JSON.stringify({
+          type: 'response.create',
+          response: {
+            modalities: ['audio', 'text'],
+          }
+        }));
       }
     }, 2500);
   }, [clearListeningWatchdog, updateStatus]);
@@ -113,7 +111,10 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         // Server VAD with create_response:true isn't always reliable on iOS
         if (dcRef.current?.readyState === 'open') {
           console.log('[Voice] Sending immediate response.create after speech stopped');
-          dcRef.current.send(JSON.stringify({ type: 'response.create' }));
+          dcRef.current.send(JSON.stringify({
+            type: 'response.create',
+            response: { modalities: ['audio', 'text'] }
+          }));
         }
         
         // Also set a fallback in case the first one doesn't work
@@ -123,7 +124,10 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         responseFallbackRef.current = window.setTimeout(() => {
           if (dcRef.current?.readyState === 'open') {
             console.log('[Voice] Fallback: retrying response.create');
-            dcRef.current.send(JSON.stringify({ type: 'response.create' }));
+            dcRef.current.send(JSON.stringify({
+              type: 'response.create',
+              response: { modalities: ['audio', 'text'] }
+            }));
           }
         }, 3000);
         break;
@@ -153,11 +157,34 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
         break;
 
+      // Some sessions/models may emit text deltas instead of audio_transcript deltas.
+      // Handle both to avoid "no response" when audio output is suppressed.
+      case 'response.text.delta':
+      case 'response.output_text.delta':
+        {
+          const delta = (event as Record<string, unknown>).delta as string;
+          if (delta) {
+            console.log('Agent text delta:', delta);
+            setAgentResponse(prev => prev + delta);
+            optionsRef.current.onAgentResponse?.(delta);
+          }
+        }
+        break;
+
       case 'response.audio_transcript.done':
         {
           const fullTranscript = (event as Record<string, unknown>).transcript as string;
           console.log('Agent finished speaking, full transcript:', fullTranscript);
           optionsRef.current.onAgentResponseComplete?.(fullTranscript || '');
+        }
+        break;
+
+      case 'response.text.done':
+      case 'response.output_text.done':
+        {
+          const fullText = ((event as Record<string, unknown>).text as string) || '';
+          console.log('Agent text done:', fullText);
+          optionsRef.current.onAgentResponseComplete?.(fullText);
         }
         break;
 
