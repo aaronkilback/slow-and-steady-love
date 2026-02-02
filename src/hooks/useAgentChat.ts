@@ -13,7 +13,7 @@ interface AgentConversation {
   id: string;
   title: string | null;
   updated_at: string;
-  agent_id: string;
+  agent_id?: string | null;
 }
 
 interface OperatorProfile {
@@ -105,9 +105,21 @@ Your capabilities:
 // Use the local Supabase edge function for AI chat
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
-// Use the actual Fortress table names (aegis_conversations and aegis_messages exist)
-const FORTRESS_CONVERSATION_TABLE = "aegis_conversations";
-const FORTRESS_MESSAGE_TABLE = "aegis_messages";
+// Fortress platform tables (external)
+const FORTRESS_CONVERSATION_TABLE = "agent_conversations";
+const FORTRESS_MESSAGE_TABLE = "agent_messages";
+
+function normalizeForMatch(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function shouldRetryWithoutAgentId(err: any) {
+  const msg = (err?.message ?? "").toString().toLowerCase();
+  return msg.includes("agent_id") && (msg.includes("column") || msg.includes("schema") || msg.includes("does not exist"));
+}
 
 export function useAgentChat(agentId: string = "aegis") {
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
@@ -195,28 +207,34 @@ export function useAgentChat(agentId: string = "aegis") {
 
     const { data, error } = await fortressClient
       .from(FORTRESS_CONVERSATION_TABLE)
-      .select("id, title, updated_at, agent_id")
+      // agent_id may not exist on the Fortress table; keep the select minimal.
+      .select("id, title, updated_at")
       .eq("user_id", userId)
       .order("updated_at", { ascending: false });
 
     if (!error && data) {
-      // Filter conversations for this specific agent
-      // Match by agent_id OR by title pattern "Chat with [AgentName]"
-      const agentName = agentConfig.name.toLowerCase();
-      const filteredConversations = data.filter((conv: any) => {
-        if (conv.agent_id === agentId) return true;
-        if (conv.title) {
-          const titleLower = conv.title.toLowerCase();
-          if (titleLower.includes(`chat with ${agentName}`)) return true;
-          if (titleLower.includes(agentName) && agentId !== "aegis") return true;
-        }
+      // Filter conversations for this specific agent.
+      // Prefer agent_id when present; otherwise use a tolerant title match.
+      const agentNameN = normalizeForMatch(agentConfig.name);
+      const filteredConversations = (data as any[]).filter((conv) => {
+        if (conv.agent_id && conv.agent_id === agentId) return true;
+        if (!conv.title) return agentId === "aegis";
+
+        const titleN = normalizeForMatch(conv.title);
+        // ex: "Chat with SENTINEL-OPS" should match both "sentinel" and "sentinel ops"
+        if (titleN.includes("chat with") && titleN.includes(agentNameN)) return true;
+        if (agentId !== "aegis" && titleN.includes(agentNameN)) return true;
         return false;
       });
 
       setConversations(filteredConversations);
-      if (filteredConversations.length > 0 && !currentConversationId) {
-        setCurrentConversationId(filteredConversations[0].id);
-      }
+      // Ensure we always select a valid conversation for the *current* agent.
+      setCurrentConversationId((prev) => {
+        if (filteredConversations.length === 0) return null;
+        if (!prev) return filteredConversations[0].id;
+        const stillExists = filteredConversations.some((c) => c.id === prev);
+        return stillExists ? prev : filteredConversations[0].id;
+      });
       return;
     }
 
@@ -250,11 +268,25 @@ export function useAgentChat(agentId: string = "aegis") {
       return null;
     }
 
-    const { data, error } = await fortressClient
+    const preferredTitle = `Chat with ${agentConfig.name}`;
+
+    // Fortress schema may not include agent_id; try with agent_id first, then fall back.
+    let data: any = null;
+    let error: any = null;
+
+    ({ data, error } = await fortressClient
       .from(FORTRESS_CONVERSATION_TABLE)
-      .insert({ user_id: userId, agent_id: agentId })
+      .insert({ user_id: userId, agent_id: agentId, title: preferredTitle } as any)
       .select("id")
-      .single();
+      .single());
+
+    if (error && shouldRetryWithoutAgentId(error)) {
+      ({ data, error } = await fortressClient
+        .from(FORTRESS_CONVERSATION_TABLE)
+        .insert({ user_id: userId, title: preferredTitle } as any)
+        .select("id")
+        .single());
+    }
 
     if (!error && data?.id) {
       setCurrentConversationId(data.id);
@@ -268,11 +300,23 @@ export function useAgentChat(agentId: string = "aegis") {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await fortressClient
+    // Fortress schema may not include agent_id; try with agent_id first, then fall back.
+    let data: any = null;
+    let error: any = null;
+
+    ({ data, error } = await fortressClient
       .from(FORTRESS_MESSAGE_TABLE)
-      .insert({ conversation_id: conversationId, role, content, agent_id: agentId })
+      .insert({ conversation_id: conversationId, role, content, agent_id: agentId } as any)
       .select("id, role, content, created_at")
-      .single();
+      .single());
+
+    if (error && shouldRetryWithoutAgentId(error)) {
+      ({ data, error } = await fortressClient
+        .from(FORTRESS_MESSAGE_TABLE)
+        .insert({ conversation_id: conversationId, role, content } as any)
+        .select("id, role, content, created_at")
+        .single());
+    }
 
     if (!error && data) return data;
     throw new Error(error?.message || "Failed to save message");

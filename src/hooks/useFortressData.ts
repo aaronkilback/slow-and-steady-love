@@ -110,21 +110,39 @@ export function useAgentConversationAgents() {
   return useQuery({
     queryKey: ["fortress-conversation-agents"],
     queryFn: async () => {
-      // Fetch unique agent names from aegis_conversations (the actual table name)
-      const { data, error } = await fortressClient
-        .from("aegis_conversations")
-        .select("title, agent_id")
-        .order("updated_at", { ascending: false });
+      // Fetch unique agent names from conversation history.
+      // Fortress deployments may use different table names; try the most likely ones.
+      const TABLE_CANDIDATES = ["agent_conversations", "aegis_conversations"] as const;
 
-      if (error) {
-        console.error("Error fetching agent conversations:", error);
+      let data: any[] | null = null;
+      let lastError: any = null;
+
+      for (const table of TABLE_CANDIDATES) {
+        const resp = await fortressClient
+          .from(table)
+          .select("title, agent_id")
+          .order("updated_at", { ascending: false });
+
+        if (!resp.error) {
+          data = resp.data as any[];
+          lastError = null;
+          break;
+        }
+
+        lastError = resp.error;
+        const code = (resp.error as any)?.code;
+        if (code && code !== "PGRST205" && code !== "42P01") break;
+      }
+
+      if (!data) {
+        if (lastError) console.error("Error fetching agent conversations:", lastError);
         return [];
       }
 
       // Extract unique agent names from conversation titles like "Chat with RYAN-INTEL"
       // and from agent_id field
       const agentNames = new Set<string>();
-      (data || []).forEach((conv: { title: string | null; agent_id: string | null }) => {
+      (data || []).forEach((conv: { title: string | null; agent_id?: string | null }) => {
         // Check agent_id first
         if (conv.agent_id && conv.agent_id !== 'aegis') {
           agentNames.add(conv.agent_id);
