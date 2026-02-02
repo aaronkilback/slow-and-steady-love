@@ -32,6 +32,33 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const listeningWatchdogRef = useRef<number | null>(null);
   const userHasSpokenRef = useRef(false);
   const greetedRef = useRef(false);
+
+  // iOS PWA debugging: ship a compact event trail to backend logs.
+  const telemetryLastSentRef = useRef<number>(0);
+  const sendTelemetry = useCallback((payload: {
+    phase: string;
+    eventType?: string;
+    status?: string;
+    details?: Record<string, unknown>;
+    level?: 'info' | 'warn' | 'error';
+  }) => {
+    const now = Date.now();
+    const minInterval = payload.level === 'error' ? 0 : 600;
+    if (now - telemetryLastSentRef.current < minInterval) return;
+    telemetryLastSentRef.current = now;
+
+    // Fire-and-forget (never block realtime processing)
+    void supabase.functions
+      .invoke('realtime-telemetry', {
+        body: {
+          ts: new Date().toISOString(),
+          ...payload,
+        },
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, []);
   
   const optionsRef = useRef(options);
   useEffect(() => {
@@ -76,6 +103,26 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
   const handleRealtimeEvent = useCallback((event: Record<string, unknown>) => {
     console.log('Realtime event:', event.type, event);
+
+    // Log only high-signal events to backend.
+    const type = String((event as any).type || '');
+    if (
+      type === 'input_audio_buffer.speech_started' ||
+      type === 'input_audio_buffer.speech_stopped' ||
+      type === 'input_audio_buffer.committed' ||
+      type === 'conversation.item.input_audio_transcription.completed' ||
+      type === 'response.done' ||
+      type === 'response.audio.delta' ||
+      type === 'response.output_audio.delta' ||
+      type === 'error'
+    ) {
+      sendTelemetry({
+        phase: 'realtime_event',
+        eventType: type,
+        status: statusRef.current,
+        level: type === 'error' ? 'error' : 'info',
+      });
+    }
 
     switch (event.type) {
       case 'session.created':
@@ -254,7 +301,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       case 'response.done':
         setIsAgentSpeaking(false);
         updateStatus('connected');
-        setAgentResponse('');
+        // Do NOT clear agentResponse here; on iOS we often only get a short burst of deltas.
+        // Clearing makes it appear like "no response".
         clearListeningWatchdog();
         break;
 
@@ -263,6 +311,17 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           const errorData = (event as Record<string, unknown>).error as Record<string, unknown>;
           console.error('Realtime error:', errorData);
           optionsRef.current.onError?.(errorData?.message as string || 'Unknown error');
+          sendTelemetry({
+            phase: 'realtime_error',
+            eventType: 'error',
+            status: statusRef.current,
+            level: 'error',
+            details: {
+              message: (errorData as any)?.message,
+              code: (errorData as any)?.code,
+              type: (errorData as any)?.type,
+            },
+          });
           clearListeningWatchdog();
         }
         break;
@@ -353,6 +412,12 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       });
       mediaStreamRef.current = stream;
       console.log('Microphone access granted, tracks:', stream.getAudioTracks().length);
+      sendTelemetry({
+        phase: 'connect',
+        eventType: 'getUserMedia.ok',
+        status: 'connecting',
+        details: { audioTracks: stream.getAudioTracks().length },
+      });
 
       // Set connection timeout
       if (connectTimeoutRef.current) {
@@ -379,6 +444,11 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
       console.log('Got ephemeral token, session:', tokenData.session_id);
       const ephemeralKey = tokenData.client_secret.value;
+      sendTelemetry({
+        phase: 'connect',
+        eventType: 'token.ok',
+        status: 'connecting',
+      });
 
       // Create audio element BEFORE PeerConnection for iOS
       const audioEl = document.createElement('audio');
@@ -399,6 +469,11 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         ]
       });
       pcRef.current = pc;
+      sendTelemetry({
+        phase: 'connect',
+        eventType: 'pc.created',
+        status: 'connecting',
+      });
 
       pc.oniceconnectionstatechange = () => {
         console.log('ICE state:', pc.iceConnectionState);
@@ -459,6 +534,11 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           connectTimeoutRef.current = null;
         }
         updateStatus('connected');
+        sendTelemetry({
+          phase: 'connect',
+          eventType: 'dc.open',
+          status: 'connected',
+        });
 
         // Force session settings on connect (helps on iOS PWA when session create settings are flaky)
         try {
@@ -560,6 +640,15 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
       console.log('WebRTC connection established!');
+      sendTelemetry({
+        phase: 'connect',
+        eventType: 'pc.connected',
+        status: statusRef.current,
+        details: {
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+        },
+      });
 
     } catch (error) {
       if (connectTimeoutRef.current) {
@@ -568,10 +657,19 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       }
       console.error('Connection error:', error);
       optionsRef.current.onError?.(error instanceof Error ? error.message : 'Connection failed');
+      sendTelemetry({
+        phase: 'connect_error',
+        eventType: 'connect.error',
+        status: statusRef.current,
+        level: 'error',
+        details: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
       updateStatus('idle');
       disconnect();
     }
-  }, [updateStatus, disconnect, handleRealtimeEvent]);
+  }, [updateStatus, disconnect, handleRealtimeEvent, sendTelemetry]);
 
   const sendTextMessage = useCallback((text: string) => {
     if (dcRef.current?.readyState !== 'open') {
