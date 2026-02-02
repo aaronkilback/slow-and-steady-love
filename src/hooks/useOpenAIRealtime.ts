@@ -113,13 +113,25 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       // STEP 2: Get microphone with iOS-compatible constraints
       // This MUST happen synchronously from user gesture
       console.log("[Realtime] Requesting microphone access");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 24000,
-        },
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 24000,
+          },
+        });
+      } catch (micError) {
+        console.error("[Realtime] Microphone access denied:", micError);
+        const micMsg = micError instanceof Error && micError.name === "NotAllowedError"
+          ? "Microphone access denied. Check Settings > Safari > Microphone."
+          : "Microphone access failed. Try Push-to-Talk.";
+        setError(micMsg);
+        options.onError?.(micMsg);
+        updateStatus("idle");
+        return;
+      }
       streamRef.current = stream;
       console.log("[Realtime] Microphone access granted");
 

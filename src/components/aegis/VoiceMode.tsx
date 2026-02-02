@@ -290,10 +290,10 @@ export function VoiceMode({
               </p>
             )}
 
-            {transport === "realtime" && onSwitchToPushToTalk && voiceState === "idle" && (
+            {transport === "realtime" && onSwitchToPushToTalk && (voiceState === "idle" || voiceState === "processing" || errorMessage) && (
               <div className="mt-4 flex justify-center">
                 <Button variant="secondary" onClick={onSwitchToPushToTalk}>
-                  Use push-to-talk
+                  Use push-to-talk instead
                 </Button>
               </div>
             )}
