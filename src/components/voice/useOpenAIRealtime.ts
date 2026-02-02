@@ -14,6 +14,7 @@ interface UseOpenAIRealtimeOptions {
 
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'thinking'>('idle');
+  const statusRef = useRef(status);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [agentResponse, setAgentResponse] = useState('');
@@ -33,6 +34,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   useEffect(() => { optionsRef.current = options; }, [options]);
 
   const updateStatus = useCallback((newStatus: typeof status) => {
+    statusRef.current = newStatus;
     setStatus(newStatus);
     optionsRef.current.onStatusChange?.(newStatus);
   }, []);
@@ -87,11 +89,12 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         updateStatus('thinking');
         if (responseFallbackRef.current) window.clearTimeout(responseFallbackRef.current);
         responseFallbackRef.current = window.setTimeout(() => {
-          if (dcRef.current?.readyState === 'open') {
+          // Use statusRef.current to avoid stale closures.
+          if (dcRef.current?.readyState === 'open' && statusRef.current === 'thinking') {
             console.log('[Voice] Fallback: manually requesting response');
             dcRef.current.send(JSON.stringify({ type: 'response.create' }));
           }
-        }, 5000);
+        }, 3000);
         break;
       case 'input_audio_buffer.committed':
         updateStatus('thinking');
