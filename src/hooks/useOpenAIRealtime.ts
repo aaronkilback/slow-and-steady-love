@@ -192,6 +192,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           setTranscript(transcriptText);
           optionsRef.current.onTranscript?.(transcriptText, true);
           clearListeningWatchdog();
+          
+          // CRITICAL: If we got a transcription but no response is coming, force one
+          // This addresses the "no response" bug on iOS PWA
+          if (responseFallbackRef.current) {
+            window.clearTimeout(responseFallbackRef.current);
+          }
+          responseFallbackRef.current = window.setTimeout(() => {
+            if (dcRef.current?.readyState === 'open' && statusRef.current !== 'speaking') {
+              console.log('[Voice] Fallback: No response after transcription, forcing response.create');
+              sendTelemetry({
+                phase: 'fallback',
+                eventType: 'transcription_no_response',
+                status: statusRef.current,
+                level: 'warn',
+              });
+              dcRef.current.send(JSON.stringify({
+                type: 'response.create',
+                response: { modalities: ['audio', 'text'] }
+              }));
+            }
+          }, 2000);
         }
         break;
 
@@ -622,7 +643,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       });
 
       console.log('ICE gathering complete, sending SDP offer to OpenAI...');
-      const sdpResponse = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
+      const sdpResponse = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2025-06-03', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${ephemeralKey}`,

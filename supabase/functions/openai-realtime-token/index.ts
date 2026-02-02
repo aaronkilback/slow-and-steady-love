@@ -25,15 +25,16 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-realtime-preview-2024-12-17',
+        // Use the latest stable model - the 2024-12-17 version may have compatibility issues
+        model: 'gpt-4o-realtime-preview-2025-06-03',
         modalities: ['audio', 'text'],
-        voice: 'ash', // Note: 'onyx' is not supported; 'ash' is the closest deep/authoritative voice
+        voice: 'ash', // Deep/authoritative voice
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         instructions: `You are AEGIS, an AI voice assistant. Be helpful and conversational.${agentContext ? `\n\nContext: ${agentContext}` : ''}`,
         input_audio_transcription: { model: 'whisper-1' },
-        // iOS can get stuck in "speech_started" with noisy inputs; slightly higher threshold + shorter silence helps
-        turn_detection: { type: 'server_vad', threshold: 0.65, prefix_padding_ms: 200, silence_duration_ms: 500, create_response: true }
+        // VAD settings for iOS stability
+        turn_detection: { type: 'server_vad', threshold: 0.6, prefix_padding_ms: 200, silence_duration_ms: 500, create_response: true }
       }),
     });
 
