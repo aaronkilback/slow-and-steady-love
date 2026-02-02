@@ -48,9 +48,9 @@ ${agentContext ? `\nContext: ${agentContext}` : ''}`,
         input_audio_transcription: { model: 'whisper-1' },
         turn_detection: { 
           type: 'server_vad', 
-          threshold: 0.5, 
-          prefix_padding_ms: 300, 
-          silence_duration_ms: 800, 
+          threshold: 0.3,           // Lower threshold = more sensitive to voice
+          prefix_padding_ms: 500,   // More padding before speech
+          silence_duration_ms: 600, // Faster response after silence
           create_response: true 
         }
       }),
