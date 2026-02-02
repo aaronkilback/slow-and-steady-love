@@ -11,27 +11,23 @@ interface UseOpenAIRealtimeOptions {
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'speaking'>('idle');
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
-  const [micLevel, setMicLevel] = useState(0); // 0-1 normalized mic input level
+  const [micLevel, setMicLevel] = useState(0);
   const [lastEventType, setLastEventType] = useState<string | null>(null);
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
-
-  // Collect streaming text deltas so we can still show output even if only response.done fires.
-  const responseTextRef = useRef<string>("");
   
   useEffect(() => { 
     optionsRef.current = options; 
   }, [options]);
 
-  // Mic level analyser loop
+  // Mic level monitor for visual feedback
   const startMicLevelMonitor = useCallback((stream: MediaStream) => {
     try {
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -49,22 +45,17 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       
       const updateLevel = () => {
         if (!analyserRef.current) return;
-        
         analyserRef.current.getByteFrequencyData(dataArray);
-        // Calculate RMS for a better representation of loudness
         let sum = 0;
         for (let i = 0; i < dataArray.length; i++) {
           sum += dataArray[i] * dataArray[i];
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        const normalized = Math.min(1, rms / 128); // Normalize to 0-1
-        setMicLevel(normalized);
-        
+        setMicLevel(Math.min(1, rms / 128));
         animationFrameRef.current = requestAnimationFrame(updateLevel);
       };
       
       updateLevel();
-      console.log('[Realtime] Mic level monitor started');
     } catch (err) {
       console.warn('[Realtime] Could not start mic level monitor:', err);
     }
@@ -83,103 +74,22 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     setMicLevel(0);
   }, []);
 
-  const extractTextFromResponseDone = useCallback((evt: any): string => {
-    // Newer realtime schema: response.done includes response.output[].content[].text
-    const out = evt?.response?.output;
-    if (Array.isArray(out)) {
-      const parts: string[] = [];
-      for (const item of out) {
-        const content = item?.content;
-        if (!Array.isArray(content)) continue;
-        for (const c of content) {
-          const t = (c?.text ?? c?.transcript) as unknown;
-          if (typeof t === 'string' && t.trim()) parts.push(t.trim());
-        }
-      }
-      if (parts.length) return parts.join('\n');
-    }
-    // Fallbacks
-    if (typeof evt?.text === 'string' && evt.text.trim()) return evt.text.trim();
-    if (typeof evt?.transcript === 'string' && evt.transcript.trim()) return evt.transcript.trim();
-    return '';
-  }, []);
-
-  const waitForIceGatheringComplete = useCallback((pc: RTCPeerConnection, timeoutMs = 2500) => {
-    // For non-trickle HTTP SDP exchange, we must wait until ICE candidates are embedded
-    // in pc.localDescription.sdp. Otherwise the connection can appear “connected” but
-    // media/data never flow reliably (especially on mobile networks).
-    if (pc.iceGatheringState === 'complete') return Promise.resolve();
-
-    return new Promise<void>((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        pc.removeEventListener('icegatheringstatechange', onChange);
-        resolve();
-      };
-
-      const onChange = () => {
-        console.log('[Realtime] ICE gathering state:', pc.iceGatheringState);
-        if (pc.iceGatheringState === 'complete') finish();
-      };
-
-      pc.addEventListener('icegatheringstatechange', onChange);
-      setTimeout(finish, timeoutMs);
-    });
-  }, []);
-
-  // Request Wake Lock to prevent screen from sleeping during voice session
-  const requestWakeLock = useCallback(async () => {
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        console.log('[Realtime] Wake Lock acquired - screen will stay on');
-        
-        // Re-acquire wake lock if released (e.g., tab switch)
-        wakeLockRef.current.addEventListener('release', () => {
-          console.log('[Realtime] Wake Lock released');
-        });
-      } catch (err) {
-        console.warn('[Realtime] Wake Lock not available:', err);
-      }
-    } else {
-      console.log('[Realtime] Wake Lock API not supported');
-    }
-  }, []);
-
-  const releaseWakeLock = useCallback(() => {
-    if (wakeLockRef.current) {
-      wakeLockRef.current.release().catch(() => {});
-      wakeLockRef.current = null;
-      console.log('[Realtime] Wake Lock released');
-    }
-  }, []);
-
   const disconnect = useCallback(() => {
     console.log('[Realtime] Disconnecting...');
-    
-    // Stop mic level monitor
     stopMicLevelMonitor();
-    
-    // Release wake lock
-    releaseWakeLock();
     
     if (dcRef.current) {
       dcRef.current.close();
       dcRef.current = null;
     }
-    
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
-    
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach(t => t.stop());
       mediaStreamRef.current = null;
     }
-    
     if (audioElementRef.current) {
       audioElementRef.current.pause();
       audioElementRef.current.srcObject = null;
@@ -190,16 +100,14 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     setIsAgentSpeaking(false);
     setLastEventType(null);
     setStatus('idle');
-  }, [releaseWakeLock, stopMicLevelMonitor]);
+  }, [stopMicLevelMonitor]);
 
   /**
    * CRITICAL: This function MUST be called directly from a button onClick handler.
-   * iOS PWA mode requires getUserMedia to be initiated synchronously from user interaction.
-   * Do NOT call this from useEffect, setTimeout, or async callbacks.
+   * iOS PWA mode requires getUserMedia to be initiated from user interaction.
    */
   const connect = useCallback(async () => {
     try {
-      // Prevent duplicate connects (double-taps, rerenders)
       if (pcRef.current || status === 'connecting' || status === 'connected' || status === 'speaking') {
         return;
       }
@@ -207,29 +115,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Starting connection...');
       setStatus('connecting');
 
-      // CRITICAL (iOS Safari / iOS PWA): Initiate microphone capture as the FIRST awaited call.
-      // Do NOT await anything (network, wake lock, timers) before getUserMedia, or iOS may
-      // show "listening" UI while the mic never actually becomes active.
-      console.log('[Realtime] Requesting microphone (must be first await)...');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 24000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true, // Helps with iOS audio levels
-        },
-      });
-      mediaStreamRef.current = stream;
-      console.log('[Realtime] Microphone access granted');
-
-      // Start mic level monitor for visual feedback
-      startMicLevelMonitor(stream);
-
-      // Request Wake Lock to keep screen awake during voice session (best-effort; may be unsupported on iOS)
-      // Not awaited to avoid coupling mic activation to this capability.
-      requestWakeLock().catch(() => {});
-      
       // Step 1: Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
         body: { agentContext: optionsRef.current.agentContext } 
@@ -242,55 +127,45 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Got session token');
 
       // Step 2: Create RTCPeerConnection
-      // Add a STUN server for more reliable ICE negotiation on mobile networks.
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-      });
+      const pc = new RTCPeerConnection();
       pcRef.current = pc;
-
-      pc.oniceconnectionstatechange = () => {
-        console.log('[Realtime] ICE state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-          optionsRef.current.onError?.('Voice connection lost (network/ICE).');
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        console.log('[Realtime] Connection state:', pc.connectionState);
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          optionsRef.current.onError?.('Voice connection lost.');
-        }
-      };
 
       // Step 3: Create audio element for playback (iOS PWA compatible)
       const audioEl = document.createElement('audio');
       audioEl.autoplay = true;
-      // iOS often blocks first audio output unless you "unlock" it with a user gesture.
-      // Start muted and attempt to play immediately (still within the original tap handler).
-      audioEl.muted = true;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (audioEl as any).playsInline = true;
       audioEl.setAttribute('playsinline', 'true');
-      audioEl.setAttribute('webkit-playsinline', 'true');
       audioElementRef.current = audioEl;
       document.body.appendChild(audioEl);
-      audioEl.play().catch(() => {
-        // Ignore; we'll retry after the remote track arrives.
-      });
 
       // Step 4: Handle incoming audio track
       pc.ontrack = (e) => {
         console.log('[Realtime] Received audio track');
         audioEl.srcObject = e.streams[0];
-        // Unmute once we have actual audio and try to play.
-        audioEl.muted = false;
         audioEl.play().catch(() => {
-          // iOS might still block; require one additional user interaction.
+          // iOS might block autoplay, add touch listener as fallback
           window.addEventListener('pointerdown', () => audioEl.play(), { once: true });
         });
       };
 
-      // Step 5: Add microphone tracks to peer connection
+      // Step 5: Get microphone access and add tracks
+      console.log('[Realtime] Requesting microphone...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 24000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      mediaStreamRef.current = stream;
+      console.log('[Realtime] Microphone access granted');
+      
+      // Start mic level monitor
+      startMicLevelMonitor(stream);
+      
+      // Add tracks to peer connection
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       // Step 6: Create data channel for events
@@ -300,149 +175,40 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       dc.onopen = () => {
         console.log('[Realtime] Data channel open - connected!');
         setStatus('connected');
-
-        // Explicitly configure the session after connect.
-        // On iOS PWA we sometimes see speech events + response.done with no transcript/output unless we do this.
-        try {
-          dc.send(
-            JSON.stringify({
-              type: 'session.update',
-              session: {
-                // Ensure both text + audio are permitted outputs
-                output_modalities: ['audio', 'text'],
-                // Ensure server-side transcription is enabled
-                input_audio_transcription: { model: 'whisper-1' },
-                // Prefer VAD-managed turns, but we also send response.create on speech_stopped/transcription
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.5,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 800,
-                  create_response: true,
-                },
-              },
-            })
-          );
-        } catch (err) {
-          console.warn('[Realtime] session.update failed:', err);
-        }
-
-        // Some realtime sessions won’t emit responses unless there is at least one conversation item.
-        // Seed a short “greeting” message and then request a response.
-        try {
-          dc.send(
-            JSON.stringify({
-              type: 'conversation.item.create',
-              item: {
-                type: 'message',
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_text',
-                    text: 'Greet the operator briefly as AEGIS.',
-                  },
-                ],
-              },
-            })
-          );
-        } catch (err) {
-          console.warn('[Realtime] Failed to seed conversation item:', err);
-        }
         
-        // Request the response (audio + text)
-        dc.send(
-          JSON.stringify({
-            type: 'response.create',
-            response: {
-              // Newer schema uses output_modalities; keep modalities for backwards compatibility.
-              output_modalities: ['audio', 'text'],
-              modalities: ['audio', 'text'],
-            },
-          })
-        );
+        // Send initial greeting request
+        dc.send(JSON.stringify({ 
+          type: 'response.create', 
+          response: { 
+            modalities: ['audio', 'text'], 
+            instructions: 'Greet the user briefly as AEGIS, their AI security agent.' 
+          } 
+        }));
       };
       
       dc.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data);
-
-          // Useful for debugging “stuck on listening” cases (iOS often succeeds in WebRTC but never triggers a response)
+          
           if (d?.type) {
             console.log('[Realtime] Event:', d.type);
             setLastEventType(d.type);
-          }
-
-          // Input audio events (helpful for iOS PWA)
-          if (d.type === 'input_audio_buffer.speech_started') {
-            // confirms audio is reaching the session
-          }
-          if (d.type === 'input_audio_buffer.speech_stopped') {
-            // If server-side VAD doesn’t auto-create a response, force one at end of turn.
-            try {
-              dcRef.current?.send(
-                JSON.stringify({
-                  type: 'response.create',
-                  response: {
-                    output_modalities: ['audio', 'text'],
-                    modalities: ['audio', 'text'],
-                  },
-                })
-              );
-            } catch {
-              // ignore
-            }
           }
           
           // User speech transcription
           if (d.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('[Realtime] User said:', d.transcript);
             optionsRef.current.onTranscript?.(d.transcript);
-
-            // IMPORTANT: Explicitly request a response on each completed transcription.
-            // Relying on server_vad.create_response alone can fail/stall on some iOS/WebRTC paths.
-            try {
-              dcRef.current?.send(
-                JSON.stringify({
-                  type: 'response.create',
-                  response: {
-                    output_modalities: ['audio', 'text'],
-                    modalities: ['audio', 'text'],
-                  },
-                })
-              );
-            } catch (err) {
-              console.warn('[Realtime] Failed to request response:', err);
-            }
           }
           
-          // Streaming text output
-          if (d.type === 'response.output_text.delta') {
-            const delta = typeof d.delta === 'string' ? d.delta : '';
-            if (delta) responseTextRef.current += delta;
-          }
-
-          if (d.type === 'response.output_text.done') {
-            const finalText =
-              (typeof d.text === 'string' && d.text.trim())
-                ? d.text.trim()
-                : responseTextRef.current.trim();
-            if (finalText) {
-              console.log('[Realtime] Agent text:', finalText);
-              optionsRef.current.onAgentResponseComplete?.(finalText);
-            }
-          }
-
-          // Audio transcript (older schema)
+          // Agent response complete (audio transcript)
           if (d.type === 'response.audio_transcript.done') {
-            const t = typeof d.transcript === 'string' ? d.transcript.trim() : '';
-            if (t) {
-              console.log('[Realtime] Agent said:', t);
-              optionsRef.current.onAgentResponseComplete?.(t);
-            }
+            console.log('[Realtime] Agent said:', d.transcript);
+            optionsRef.current.onAgentResponseComplete?.(d.transcript || '');
           }
           
-          // Agent is speaking (support old + new event names)
-          if (d.type === 'response.audio.delta' || d.type === 'response.output_audio.delta') {
+          // Agent is speaking
+          if (d.type === 'response.audio.delta') {
             setIsAgentSpeaking(true);
             setStatus('speaking');
           }
@@ -451,15 +217,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           if (d.type === 'response.done') {
             setIsAgentSpeaking(false);
             setStatus('connected');
-
-            // Final catch-all: pull any text embedded in response.done
-            const doneText = extractTextFromResponseDone(d) || responseTextRef.current.trim();
-            if (doneText) {
-              console.log('[Realtime] response.done text:', doneText);
-              optionsRef.current.onAgentResponseComplete?.(doneText);
-            }
-
-            responseTextRef.current = '';
           }
           
           // Error from API
@@ -485,13 +242,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // IMPORTANT: wait for ICE candidates to be gathered into localDescription.sdp
-      await waitForIceGatheringComplete(pc);
-      const localSdp = pc.localDescription?.sdp;
-      if (!localSdp) {
-        throw new Error('Missing local SDP after ICE gathering');
-      }
-
       // Step 8: Send offer to OpenAI and get answer
       console.log('[Realtime] Sending offer to OpenAI...');
       const sdpResp = await fetch(
@@ -502,7 +252,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             'Authorization': `Bearer ${data.client_secret.value}`, 
             'Content-Type': 'application/sdp' 
           }, 
-          body: localSdp 
+          body: offer.sdp 
         }
       );
       
@@ -520,22 +270,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       setStatus('idle');
       disconnect();
     }
-  }, [disconnect, status, requestWakeLock]);
-
-  // Re-acquire wake lock when page becomes visible again (tab switch, screen wake)
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && 
-          (status === 'connected' || status === 'speaking') && 
-          !wakeLockRef.current) {
-        console.log('[Realtime] Re-acquiring wake lock after visibility change');
-        await requestWakeLock();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [status, requestWakeLock]);
+  }, [disconnect, status, startMicLevelMonitor]);
 
   // Cleanup on unmount
   useEffect(() => () => disconnect(), [disconnect]);
