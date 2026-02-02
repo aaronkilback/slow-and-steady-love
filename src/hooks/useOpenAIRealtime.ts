@@ -288,8 +288,25 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const connect = useCallback(async () => {
     try {
       updateStatus('connecting');
-      console.log('Requesting ephemeral token...');
 
+      // ========================================================================
+      // CRITICAL iOS PWA FIX: getUserMedia MUST be the FIRST async call
+      // immediately after the user tap. Any await before this breaks iOS PWA.
+      // ========================================================================
+      console.log('Requesting microphone access (must be first async call)...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 24000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+      mediaStreamRef.current = stream;
+      console.log('Microphone access granted, tracks:', stream.getAudioTracks().length);
+
+      // Set connection timeout
       if (connectTimeoutRef.current) {
         window.clearTimeout(connectTimeoutRef.current);
       }
@@ -297,8 +314,10 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         console.warn('Realtime voice connection timed out');
         optionsRef.current.onError?.('Voice connection timed out. Tap mic to try again.');
         disconnect();
-      }, 15000);
+      }, 20000);
 
+      // Get ephemeral token
+      console.log('Requesting ephemeral token...');
       const { data: tokenData, error: tokenError } = await supabase.functions.invoke('openai-realtime-token', {
         body: {
           agentContext: optionsRef.current.agentContext,
@@ -313,7 +332,18 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('Got ephemeral token, session:', tokenData.session_id);
       const ephemeralKey = tokenData.client_secret.value;
 
-      // IMPORTANT: Add ICE servers for better NAT traversal on iOS
+      // Create audio element BEFORE PeerConnection for iOS
+      const audioEl = document.createElement('audio');
+      audioEl.autoplay = true;
+      (audioEl as any).playsInline = true;
+      audioEl.setAttribute('playsinline', 'true');
+      audioEl.setAttribute('webkit-playsinline', 'true');
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      document.body.appendChild(audioEl);
+      audioElementRef.current = audioEl;
+
+      // Create PeerConnection with STUN servers
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
@@ -338,29 +368,15 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
       };
 
-      // CRITICAL for iOS PWA: Create audio element with all iOS-required attributes
-      const audioEl = document.createElement('audio');
-      audioEl.autoplay = true;
-      (audioEl as any).playsInline = true;
-      audioEl.setAttribute('playsinline', 'true');
-      audioEl.setAttribute('webkit-playsinline', 'true');
-      audioEl.muted = false;
-      audioEl.volume = 1;
-      // iOS sometimes needs the audio element to be in the DOM before assigning srcObject
-      document.body.appendChild(audioEl);
-      audioElementRef.current = audioEl;
-
       pc.ontrack = (event) => {
-        console.log('Received audio track from OpenAI, tracks:', event.streams[0]?.getAudioTracks().length);
+        console.log('Received audio track from OpenAI, streams:', event.streams.length);
         if (event.streams[0]) {
           audioEl.srcObject = event.streams[0];
-          // iOS requires explicit play() call from user gesture context
           const playPromise = audioEl.play();
           if (playPromise !== undefined) {
             playPromise.catch((err) => {
               console.warn('Audio autoplay blocked:', err);
               optionsRef.current.onError?.('Tap screen to enable audio');
-              // Fallback: wait for any user interaction
               const resumeAudio = () => {
                 audioEl.play().catch(() => {});
                 document.removeEventListener('touchstart', resumeAudio);
@@ -373,19 +389,15 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
       };
 
-      console.log('Requesting microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          sampleRate: 24000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        } 
-      });
-      mediaStreamRef.current = stream;
+      // ========================================================================
+      // CRITICAL: Add audio transceiver with sendrecv direction BEFORE adding tracks.
+      // This ensures proper two-way audio negotiation on iOS WebRTC.
+      // ========================================================================
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
 
+      // Add microphone tracks to the connection
       stream.getTracks().forEach(track => {
+        console.log('Adding audio track to PeerConnection:', track.label);
         pc.addTrack(track, stream);
       });
 
