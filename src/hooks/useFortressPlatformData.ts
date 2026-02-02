@@ -9,6 +9,8 @@ interface Signal {
   description?: string;
   status: string;
   created_at: string;
+  severity?: string;
+  category?: string;
 }
 
 interface UserLocation {
@@ -33,10 +35,19 @@ interface TeamProfile {
   status?: string;
 }
 
+interface Agent {
+  id: string;
+  name: string;
+  type: string;
+  role?: string;
+  status?: string;
+}
+
 interface FortressPlatformData {
   signals: Signal[];
   locations: UserLocation[];
   profiles: TeamProfile[];
+  agents: Agent[];
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -46,6 +57,8 @@ interface FortressPlatformData {
 const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
 const LOCATION_TABLES = ["user_locations", "locations", "operator_locations"] as const;
 const PROFILE_TABLES = ["profiles", "users", "operators"] as const;
+const AGENT_TABLES = ["agents", "ai_agents"] as const;
+const CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
 
 async function tryFetchFromTables<T>(
   tables: readonly string[],
@@ -74,6 +87,7 @@ export function useFortressPlatformData(): FortressPlatformData {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [locations, setLocations] = useState<UserLocation[]>([]);
   const [profiles, setProfiles] = useState<TeamProfile[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,6 +127,59 @@ export function useFortressPlatformData(): FortressPlatformData {
         return result;
       });
       setProfiles(profilesData);
+
+      // Fetch agents from agents table
+      const agentsData = await tryFetchFromTables<Agent>(AGENT_TABLES, async (table) => {
+        const result = await fortressClient
+          .from(table)
+          .select("id, name, type, role, status")
+          .limit(50);
+        return result;
+      });
+
+      // Also discover agents from conversation titles
+      const conversationAgents: Agent[] = [];
+      for (const table of CONVERSATION_TABLES) {
+        try {
+          const { data, error: convError } = await fortressClient
+            .from(table)
+            .select("title")
+            .order("updated_at", { ascending: false })
+            .limit(100);
+          
+          if (!convError && data) {
+            const seenNames = new Set<string>();
+            data.forEach((conv: { title: string | null }) => {
+              if (conv.title) {
+                const match = conv.title.match(/^Chat with (.+)$/);
+                if (match && match[1] && !seenNames.has(match[1])) {
+                  seenNames.add(match[1]);
+                  conversationAgents.push({
+                    id: match[1].toLowerCase().replace(/[^a-z0-9]/g, '-'),
+                    name: match[1],
+                    type: "ai",
+                    role: "Specialized AI Agent",
+                    status: "online",
+                  });
+                }
+              }
+            });
+            break;
+          }
+        } catch {
+          // Continue to next table
+        }
+      }
+
+      // Merge agents, avoiding duplicates
+      const allAgents = [...agentsData];
+      const existingIds = new Set(allAgents.map(a => a.id));
+      conversationAgents.forEach(a => {
+        if (!existingIds.has(a.id)) {
+          allAgents.push(a);
+        }
+      });
+      setAgents(allAgents);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to fetch platform data";
       setError(msg);
@@ -130,6 +197,7 @@ export function useFortressPlatformData(): FortressPlatformData {
     signals,
     locations,
     profiles,
+    agents,
     isLoading,
     error,
     refresh: fetchData,
@@ -143,14 +211,15 @@ export function generatePlatformSummary(data: {
   signals: Signal[];
   locations: UserLocation[];
   profiles: TeamProfile[];
+  agents?: Agent[];
 }): string {
-  const { signals, locations, profiles } = data;
+  const { signals, locations, profiles, agents = [] } = data;
 
   const lines: string[] = [];
 
   // Signals summary
   if (signals.length > 0) {
-    const critical = signals.filter((s) => s.priority === "critical" || s.priority === "high");
+    const critical = signals.filter((s) => s.priority === "critical" || s.priority === "high" || s.severity === "critical" || s.severity === "high");
     const active = signals.filter((s) => s.status === "active" || s.status === "open");
     lines.push(`SIGNALS: ${signals.length} total, ${critical.length} high-priority, ${active.length} active.`);
     
@@ -159,11 +228,19 @@ export function generatePlatformSummary(data: {
     if (topSignals.length > 0) {
       lines.push("Recent signals:");
       topSignals.forEach((s) => {
-        lines.push(`- [${s.priority?.toUpperCase() || "INFO"}] ${s.title || s.type}${s.status ? ` (${s.status})` : ""}`);
+        const priority = s.priority || s.severity || "info";
+        lines.push(`- [${priority.toUpperCase()}] ${s.title || s.type}${s.status ? ` (${s.status})` : ""}`);
       });
     }
   } else {
     lines.push("SIGNALS: No active signals detected.");
+  }
+
+  // Agents summary
+  if (agents.length > 0) {
+    const onlineAgents = agents.filter((a) => a.status === "online");
+    lines.push(`\nAGENTS: ${agents.length} available (${onlineAgents.length} online).`);
+    lines.push("Available agents: " + agents.map(a => a.name).join(", "));
   }
 
   // Team status summary
@@ -180,7 +257,7 @@ export function generatePlatformSummary(data: {
   }
 
   // If no data at all
-  if (signals.length === 0 && profiles.length === 0 && locations.length === 0) {
+  if (signals.length === 0 && profiles.length === 0 && locations.length === 0 && agents.length === 0) {
     return "Platform data unavailable. Operating with limited intelligence.";
   }
 
