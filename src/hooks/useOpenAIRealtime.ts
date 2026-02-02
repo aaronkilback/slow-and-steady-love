@@ -412,14 +412,35 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      console.log('Sending SDP offer to OpenAI...');
+      // CRITICAL for iOS: Wait for ICE gathering to complete before sending offer
+      // This ensures all candidates are included and audio tracks are properly negotiated
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+        } else {
+          const checkState = () => {
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', checkState);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', checkState);
+          // Fallback timeout in case gathering takes too long
+          setTimeout(() => {
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }, 3000);
+        }
+      });
+
+      console.log('ICE gathering complete, sending SDP offer to OpenAI...');
       const sdpResponse = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${ephemeralKey}`,
           'Content-Type': 'application/sdp'
         },
-        body: offer.sdp
+        body: pc.localDescription?.sdp || offer.sdp
       });
 
       if (!sdpResponse.ok) {
