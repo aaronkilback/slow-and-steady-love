@@ -16,45 +16,14 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const dcRef = useRef<RTCDataChannel | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const optionsRef = useRef(options);
   
   useEffect(() => { 
     optionsRef.current = options; 
   }, [options]);
 
-  // Request Wake Lock to prevent screen from sleeping during voice session
-  const requestWakeLock = useCallback(async () => {
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        console.log('[Realtime] Wake Lock acquired - screen will stay on');
-        
-        // Re-acquire wake lock if released (e.g., tab switch)
-        wakeLockRef.current.addEventListener('release', () => {
-          console.log('[Realtime] Wake Lock released');
-        });
-      } catch (err) {
-        console.warn('[Realtime] Wake Lock not available:', err);
-      }
-    } else {
-      console.log('[Realtime] Wake Lock API not supported');
-    }
-  }, []);
-
-  const releaseWakeLock = useCallback(() => {
-    if (wakeLockRef.current) {
-      wakeLockRef.current.release().catch(() => {});
-      wakeLockRef.current = null;
-      console.log('[Realtime] Wake Lock released');
-    }
-  }, []);
-
   const disconnect = useCallback(() => {
     console.log('[Realtime] Disconnecting...');
-    
-    // Release wake lock
-    releaseWakeLock();
     
     if (dcRef.current) {
       dcRef.current.close();
@@ -80,7 +49,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     
     setIsAgentSpeaking(false);
     setStatus('idle');
-  }, [releaseWakeLock]);
+  }, []);
 
   /**
    * CRITICAL: This function MUST be called directly from a button onClick handler.
@@ -102,17 +71,14 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Requesting microphone...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          // Avoid strict constraints on iOS; let the OS pick the native format.
+          sampleRate: 24000,
+          channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true, // Helps with iOS audio levels
         },
       });
       mediaStreamRef.current = stream;
       console.log('[Realtime] Microphone access granted');
-
-      // Request Wake Lock AFTER mic is acquired (iOS user-gesture requirement)
-      requestWakeLock().catch(() => {});
       
       // Step 1: Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
@@ -125,30 +91,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       
       console.log('[Realtime] Got session token');
 
-      // Step 2: Create RTCPeerConnection with STUN servers for better connectivity
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-        ],
-      });
+      // Step 2: Create RTCPeerConnection
+      const pc = new RTCPeerConnection();
       pcRef.current = pc;
-
-      // Ensure we negotiate both directions explicitly (helps some iOS/WebRTC stacks)
-      try {
-        pc.addTransceiver('audio', { direction: 'sendrecv' });
-      } catch {
-        // Ignore if not supported; adding a track will still create a transceiver.
-      }
-
-      // Monitor ICE connection state
-      pc.oniceconnectionstatechange = () => {
-        console.log('[Realtime] ICE state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-          console.error('[Realtime] ICE connection failed');
-          optionsRef.current.onError?.('Connection lost. Please try again.');
-        }
-      };
 
       // Step 3: Create audio element for playback (iOS PWA compatible)
       const audioEl = document.createElement('audio');
@@ -171,16 +116,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       };
 
       // Step 5: Add microphone tracks to peer connection
-      stream.getTracks().forEach(track => {
-        console.log('[Realtime] Adding track:', track.kind, track.label);
-        // Some iOS edge cases leave tracks disabled; force enabled.
-        track.enabled = true;
-
-        track.addEventListener?.('ended', () => console.log('[Realtime] Track ended:', track.kind));
-        track.addEventListener?.('mute', () => console.log('[Realtime] Track muted:', track.kind));
-        track.addEventListener?.('unmute', () => console.log('[Realtime] Track unmuted:', track.kind));
-        pc.addTrack(track, stream);
-      });
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       // Step 6: Create data channel for events
       const dc = pc.createDataChannel('oai-events');
@@ -205,19 +141,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           const d = JSON.parse(e.data);
           
           // User speech transcription
-          if (d.type === 'conversation.item.input_audio_transcription.delta') {
-            // Optional: could stream partials; we keep it minimal to avoid UI churn.
-            // console.log('[Realtime] User transcription delta:', d.delta);
-          }
-
           if (d.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('[Realtime] User said:', d.transcript);
             optionsRef.current.onTranscript?.(d.transcript);
-          }
-
-          if (d.type === 'conversation.item.input_audio_transcription.failed') {
-            console.error('[Realtime] Transcription failed:', d.error);
-            optionsRef.current.onError?.(d.error?.message || 'Transcription failed');
           }
           
           // Agent response complete
@@ -261,29 +187,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // IMPORTANT (mobile): wait for ICE candidates to be gathered so the SDP is usable.
-      // Without this, some iOS networks get stuck in a "connected/listening" state.
-      const waitForIceGatheringComplete = async () => {
-        if (pc.iceGatheringState === 'complete') return;
-        await new Promise<void>((resolve) => {
-          const onStateChange = () => {
-            if (pc.iceGatheringState === 'complete') {
-              pc.removeEventListener('icegatheringstatechange', onStateChange);
-              resolve();
-            }
-          };
-          pc.addEventListener('icegatheringstatechange', onStateChange);
-          // Safety timeout: proceed anyway after 2.5s
-          setTimeout(() => {
-            pc.removeEventListener('icegatheringstatechange', onStateChange);
-            resolve();
-          }, 2500);
-        });
-      };
-
-      await waitForIceGatheringComplete();
-      const sdpToSend = pc.localDescription?.sdp ?? offer.sdp;
-
       // Step 8: Send offer to OpenAI and get answer
       console.log('[Realtime] Sending offer to OpenAI...');
       const sdpResp = await fetch(
@@ -294,7 +197,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             'Authorization': `Bearer ${data.client_secret.value}`, 
             'Content-Type': 'application/sdp' 
           }, 
-          body: sdpToSend 
+          body: offer.sdp 
         }
       );
       
@@ -312,22 +215,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       setStatus('idle');
       disconnect();
     }
-  }, [disconnect, status, requestWakeLock]);
-
-  // Re-acquire wake lock when page becomes visible again (tab switch, screen wake)
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && 
-          (status === 'connected' || status === 'speaking') && 
-          !wakeLockRef.current) {
-        console.log('[Realtime] Re-acquiring wake lock after visibility change');
-        await requestWakeLock();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [status, requestWakeLock]);
+  }, [disconnect, status]);
 
   // Cleanup on unmount
   useEffect(() => () => disconnect(), [disconnect]);
