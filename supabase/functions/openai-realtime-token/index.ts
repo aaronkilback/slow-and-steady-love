@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: 'gpt-4o-realtime-preview-2024-12-17',
         modalities: ['audio', 'text'],
-        voice: 'onyx',
+        voice: 'ash', // 'onyx' not supported in Realtime API; 'ash' is closest deep/authoritative voice
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         instructions: `You are AEGIS, lead AI security agent for the Silent Shield platform.
