@@ -90,6 +90,65 @@ ${recentMessages || '(No prior messages in this session)'}
 You have full access to platform intelligence. Reference signals, team status, available agents, and locations when relevant. Continue conversations naturally.`;
   }, [messages, currentConversationId, signals, locations, profiles, agents]);
 
+  // Track pending voice transcript to save when agent responds
+  const pendingVoiceTranscriptRef = useRef<string | null>(null);
+
+  // Save voice transcript to chat history
+  const saveVoiceTranscript = useCallback(async (userText: string, assistantText: string) => {
+    if (!userText.trim() && !assistantText.trim()) return;
+    
+    // Save user message first, then assistant response
+    // The sendMessage function handles conversation creation and saving
+    // But we need to save both messages directly since sendMessage triggers API call
+    
+    // For voice, we manually save to database since we already have the response
+    try {
+      // Import fortressClient for direct save
+      const { fortressClient } = await import("@/lib/fortress-client");
+      const { data: { user } } = await fortressClient.auth.getUser();
+      if (!user) return;
+      
+      let convId = currentConversationId;
+      
+      // Create conversation if needed
+      if (!convId) {
+        const { data: newConv } = await fortressClient
+          .from("aegis_conversations")
+          .insert({ user_id: user.id, title: userText.slice(0, 50) + (userText.length > 50 ? "..." : "") })
+          .select("id")
+          .single();
+        
+        if (newConv?.id) {
+          convId = newConv.id;
+        }
+      }
+      
+      if (!convId) return;
+      
+      // Save user message
+      if (userText.trim()) {
+        await fortressClient.from("aegis_messages").insert({
+          conversation_id: convId,
+          role: "user",
+          content: `🎤 ${userText.trim()}`,
+        });
+      }
+      
+      // Save assistant response
+      if (assistantText.trim()) {
+        await fortressClient.from("aegis_messages").insert({
+          conversation_id: convId,
+          role: "assistant", 
+          content: assistantText.trim(),
+        });
+      }
+      
+      console.log("[Voice] Saved transcript to chat history");
+    } catch (error) {
+      console.error("[Voice] Failed to save transcript:", error);
+    }
+  }, [currentConversationId]);
+
   // OpenAI Realtime API for voice
   const {
     status: realtimeStatus,
@@ -102,12 +161,20 @@ You have full access to platform intelligence. Reference signals, team status, a
   } = useOpenAIRealtime({
     onTranscript: (text) => {
       setCurrentTranscript(text);
+      // Store the transcript to save when agent response completes
+      pendingVoiceTranscriptRef.current = text;
     },
     onAgentResponse: (text) => {
       setAegisResponse(prev => prev + text);
     },
-    onAgentResponseComplete: (text) => {
-      setAegisResponse(text);
+    onAgentResponseComplete: (fullText) => {
+      setAegisResponse(fullText);
+      // Save both user transcript and agent response to chat history
+      const userTranscript = pendingVoiceTranscriptRef.current || currentTranscript;
+      if (userTranscript || fullText) {
+        saveVoiceTranscript(userTranscript || "", fullText);
+        pendingVoiceTranscriptRef.current = null;
+      }
     },
     onError: (error) => {
       console.error("[Voice] Error:", error);
