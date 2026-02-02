@@ -12,6 +12,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'speaking'>('idle');
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [micLevel, setMicLevel] = useState(0); // 0-1 normalized mic input level
+  const [lastEventType, setLastEventType] = useState<string | null>(null);
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
@@ -163,6 +164,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     }
     
     setIsAgentSpeaking(false);
+    setLastEventType(null);
     setStatus('idle');
   }, [releaseWakeLock, stopMicLevelMonitor]);
 
@@ -274,15 +276,38 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       dc.onopen = () => {
         console.log('[Realtime] Data channel open - connected!');
         setStatus('connected');
+
+        // Some realtime sessions won’t emit responses unless there is at least one conversation item.
+        // Seed a short “greeting” message and then request a response.
+        try {
+          dc.send(
+            JSON.stringify({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'user',
+                content: [
+                  {
+                    type: 'input_text',
+                    text: 'Greet the operator briefly as AEGIS.',
+                  },
+                ],
+              },
+            })
+          );
+        } catch (err) {
+          console.warn('[Realtime] Failed to seed conversation item:', err);
+        }
         
-        // Send initial greeting request
-        dc.send(JSON.stringify({ 
-          type: 'response.create', 
-          response: { 
-            modalities: ['audio', 'text'], 
-            instructions: 'Greet the user briefly as AEGIS, their AI security agent.' 
-          } 
-        }));
+        // Request the response (audio + text)
+        dc.send(
+          JSON.stringify({
+            type: 'response.create',
+            response: {
+              modalities: ['audio', 'text'],
+            },
+          })
+        );
       };
       
       dc.onmessage = (e) => {
@@ -292,6 +317,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           // Useful for debugging “stuck on listening” cases (iOS often succeeds in WebRTC but never triggers a response)
           if (d?.type) {
             console.log('[Realtime] Event:', d.type);
+            setLastEventType(d.type);
           }
           
           // User speech transcription
@@ -423,6 +449,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     status, 
     isAgentSpeaking,
     micLevel,
+    lastEventType,
     connect, 
     disconnect, 
     isConnected: status === 'connected' || status === 'speaking',
