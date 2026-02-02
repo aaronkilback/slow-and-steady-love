@@ -1,54 +1,63 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  // Must include all headers the browser may send (especially on mobile/PWA)
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-Deno.serve(async (req) => {
+serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    console.log('[openai-realtime-token] request', { method: req.method });
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      return new Response(JSON.stringify({ error: 'OpenAI API key not configured' }), 
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openaiKey) {
+      throw new Error('OPENAI_API_KEY not configured');
     }
 
-    let agentContext = '';
-    try { const body = await req.json(); agentContext = body.agentContext || ''; } catch {}
+    const { agentContext, conversationHistory } = await req.json();
 
+    // Build system instructions
+    const systemInstructions = `You are Aegis, a senior intelligence officer. Speak with authority and precision. Be concise—every word matters. ${agentContext || ''}`;
+
+    // Create ephemeral session
     const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${openaiKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        // Use the latest stable model - the 2024-12-17 version may have compatibility issues
-        model: 'gpt-4o-realtime-preview-2025-06-03',
-        modalities: ['audio', 'text'],
-        voice: 'ash', // Deep/authoritative voice
-        input_audio_format: 'pcm16',
-        output_audio_format: 'pcm16',
-        instructions: `You are AEGIS, an AI voice assistant. Be helpful and conversational.${agentContext ? `\n\nContext: ${agentContext}` : ''}`,
+        model: 'gpt-4o-realtime-preview-2024-12-17',
+        voice: 'onyx',
+        instructions: systemInstructions,
         input_audio_transcription: { model: 'whisper-1' },
-        // VAD settings for iOS stability
-        turn_detection: { type: 'server_vad', threshold: 0.6, prefix_padding_ms: 200, silence_duration_ms: 500, create_response: true }
+        turn_detection: {
+          type: 'server_vad',
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+          create_response: true
+        }
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      return new Response(JSON.stringify({ error: 'Failed to create session', details: errorText }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const error = await response.text();
+      throw new Error(`OpenAI API error: ${error}`);
     }
 
     const data = await response.json();
-    return new Response(JSON.stringify({ client_secret: data.client_secret, session_id: data.id }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(data), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
   } catch (error) {
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 });
