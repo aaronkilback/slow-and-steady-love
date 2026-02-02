@@ -289,14 +289,6 @@ export function VoiceMode({
                 Press and hold the orb to record.
               </p>
             )}
-
-            {transport === "realtime" && onSwitchToPushToTalk && (voiceState === "idle" || voiceState === "processing" || errorMessage) && (
-              <div className="mt-4 flex justify-center">
-                <Button variant="secondary" onClick={onSwitchToPushToTalk}>
-                  Use push-to-talk instead
-                </Button>
-              </div>
-            )}
           </motion.div>
 
           {/* Transcript displays */}
