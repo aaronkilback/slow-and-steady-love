@@ -110,10 +110,10 @@ export function useAgentConversationAgents() {
   return useQuery({
     queryKey: ["fortress-conversation-agents"],
     queryFn: async () => {
-      // Fetch unique agent names from agent_conversations
+      // Fetch unique agent names from aegis_conversations (the actual table name)
       const { data, error } = await fortressClient
-        .from("agent_conversations")
-        .select("title")
+        .from("aegis_conversations")
+        .select("title, agent_id")
         .order("updated_at", { ascending: false });
 
       if (error) {
@@ -122,8 +122,14 @@ export function useAgentConversationAgents() {
       }
 
       // Extract unique agent names from conversation titles like "Chat with RYAN-INTEL"
+      // and from agent_id field
       const agentNames = new Set<string>();
-      (data || []).forEach((conv: { title: string | null }) => {
+      (data || []).forEach((conv: { title: string | null; agent_id: string | null }) => {
+        // Check agent_id first
+        if (conv.agent_id && conv.agent_id !== 'aegis') {
+          agentNames.add(conv.agent_id);
+        }
+        // Also check title pattern
         if (conv.title) {
           const match = conv.title.match(/^Chat with (.+)$/);
           if (match && match[1]) {
