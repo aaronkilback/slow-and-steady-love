@@ -105,9 +105,9 @@ Your capabilities:
 // Use the local Supabase edge function for AI chat
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
-// Fortress platform table names
-const FORTRESS_CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
-const FORTRESS_MESSAGE_TABLES = ["agent_messages", "aegis_messages"] as const;
+// Use the actual Fortress table names (aegis_conversations and aegis_messages exist)
+const FORTRESS_CONVERSATION_TABLE = "aegis_conversations";
+const FORTRESS_MESSAGE_TABLE = "aegis_messages";
 
 export function useAgentChat(agentId: string = "aegis") {
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
@@ -119,7 +119,14 @@ export function useAgentChat(agentId: string = "aegis") {
   const [operator, setOperator] = useState<OperatorProfile | null>(null);
   const { toast } = useToast();
 
-  const agentConfig = AGENT_CONFIGS[agentId] || AGENT_CONFIGS.aegis;
+  // Get agent config - use predefined if available, otherwise create dynamic config
+  const agentConfig: AgentConfig = AGENT_CONFIGS[agentId] || {
+    id: agentId,
+    name: agentId.charAt(0).toUpperCase() + agentId.slice(1).replace(/-/g, ' '),
+    role: "Specialized AI Agent",
+    systemPrompt: `You are ${agentId.charAt(0).toUpperCase() + agentId.slice(1).replace(/-/g, ' ')}, a specialized AI agent for the Silent Shield Security Operations Center. You assist operators with security-related tasks and intelligence analysis.`,
+    capabilities: ["Intelligence Analysis", "Task Support", "Security Operations"],
+  };
 
   // Get current user from Fortress
   useEffect(() => {
@@ -186,72 +193,54 @@ export function useAgentChat(agentId: string = "aegis") {
   const loadConversations = async () => {
     if (!userId) return;
 
-    for (const table of FORTRESS_CONVERSATION_TABLES) {
-      // Fetch ALL conversations for this user from Fortress platform
-      // Agent-specific conversations are filtered by agent_id, but also include
-      // conversations that match "Chat with [AgentName]" pattern for historical context
-      const { data, error } = await fortressClient
-        .from(table)
-        .select("id, title, updated_at, agent_id")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false });
+    const { data, error } = await fortressClient
+      .from(FORTRESS_CONVERSATION_TABLE)
+      .select("id, title, updated_at, agent_id")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false });
 
-      if (!error && data) {
-        // Filter conversations for this specific agent
-        // Match by agent_id OR by title pattern "Chat with [AgentName]"
-        const agentName = agentConfig.name.toLowerCase();
-        const filteredConversations = data.filter((conv: any) => {
-          if (conv.agent_id === agentId) return true;
-          if (conv.title) {
-            const titleLower = conv.title.toLowerCase();
-            // Match "Chat with AgentName" or just agent name in title
-            if (titleLower.includes(`chat with ${agentName}`)) return true;
-            if (titleLower.includes(agentName) && agentId !== "aegis") return true;
-          }
-          return false;
-        });
-
-        setConversations(filteredConversations);
-        if (filteredConversations.length > 0 && !currentConversationId) {
-          setCurrentConversationId(filteredConversations[0].id);
+    if (!error && data) {
+      // Filter conversations for this specific agent
+      // Match by agent_id OR by title pattern "Chat with [AgentName]"
+      const agentName = agentConfig.name.toLowerCase();
+      const filteredConversations = data.filter((conv: any) => {
+        if (conv.agent_id === agentId) return true;
+        if (conv.title) {
+          const titleLower = conv.title.toLowerCase();
+          if (titleLower.includes(`chat with ${agentName}`)) return true;
+          if (titleLower.includes(agentName) && agentId !== "aegis") return true;
         }
-        return;
-      }
+        return false;
+      });
 
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") {
-        console.warn("Failed to load conversations:", error.message);
-        break;
+      setConversations(filteredConversations);
+      if (filteredConversations.length > 0 && !currentConversationId) {
+        setCurrentConversationId(filteredConversations[0].id);
       }
+      return;
     }
 
+    if (error) {
+      console.warn("Failed to load conversations:", error.message);
+    }
     setConversations([]);
   };
 
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    for (const table of FORTRESS_MESSAGE_TABLES) {
-      const { data, error } = await fortressClient
-        .from(table)
-        .select("id, role, content, created_at")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+    const { data, error } = await fortressClient
+      .from(FORTRESS_MESSAGE_TABLE)
+      .select("id, role, content, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
 
-      if (!error && data) {
-        setMessages(data.map((m: any) => ({ ...m, role: m.role as "user" | "assistant" })));
-        setIsLoading(false);
-        return;
-      }
-
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") {
-        console.warn("Failed to load messages:", error.message);
-        break;
-      }
+    if (!error && data) {
+      setMessages(data.map((m: any) => ({ ...m, role: m.role as "user" | "assistant" })));
+    } else {
+      if (error) console.warn("Failed to load messages:", error.message);
+      setMessages([]);
     }
-
-    setMessages([]);
     setIsLoading(false);
   };
 
@@ -261,59 +250,37 @@ export function useAgentChat(agentId: string = "aegis") {
       return null;
     }
 
-    for (const table of FORTRESS_CONVERSATION_TABLES) {
-      const { data, error } = await fortressClient
-        .from(table)
-        .insert({ user_id: userId, agent_id: agentId })
-        .select("id")
-        .single();
+    const { data, error } = await fortressClient
+      .from(FORTRESS_CONVERSATION_TABLE)
+      .insert({ user_id: userId, agent_id: agentId })
+      .select("id")
+      .single();
 
-      if (!error && data?.id) {
-        setCurrentConversationId(data.id);
-        loadConversations();
-        return data.id;
-      }
-
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") {
-        console.warn("Could not create conversation:", error.message);
-        break;
-      }
+    if (!error && data?.id) {
+      setCurrentConversationId(data.id);
+      loadConversations();
+      return data.id;
     }
 
+    if (error) console.warn("Could not create conversation:", error.message);
     toast({ variant: "destructive", title: "Chat unavailable", description: "Unable to create conversation" });
     return null;
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    for (const table of FORTRESS_MESSAGE_TABLES) {
-      const { data, error } = await fortressClient
-        .from(table)
-        .insert({ conversation_id: conversationId, role, content, agent_id: agentId })
-        .select("id, role, content, created_at")
-        .single();
+    const { data, error } = await fortressClient
+      .from(FORTRESS_MESSAGE_TABLE)
+      .insert({ conversation_id: conversationId, role, content, agent_id: agentId })
+      .select("id, role, content, created_at")
+      .single();
 
-      if (!error && data) return data;
-
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") {
-        throw new Error(error.message);
-      }
-    }
-
-    throw new Error("Platform messages table not available");
+    if (!error && data) return data;
+    throw new Error(error?.message || "Failed to save message");
   };
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-
-    for (const table of FORTRESS_CONVERSATION_TABLES) {
-      const { error } = await fortressClient.from(table).update({ title }).eq("id", conversationId);
-      if (!error) break;
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") break;
-    }
-
+    await fortressClient.from(FORTRESS_CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
     loadConversations();
   };
 
@@ -458,12 +425,7 @@ export function useAgentChat(agentId: string = "aegis") {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    for (const table of FORTRESS_CONVERSATION_TABLES) {
-      const { error } = await fortressClient.from(table).delete().eq("id", id);
-      if (!error) break;
-      const code = (error as any)?.code;
-      if (code && code !== "PGRST205") break;
-    }
+    await fortressClient.from(FORTRESS_CONVERSATION_TABLE).delete().eq("id", id);
     
     if (currentConversationId === id) {
       setCurrentConversationId(null);
