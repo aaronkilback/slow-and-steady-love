@@ -156,53 +156,145 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       updateStatus('connecting');
       connectTimeoutRef.current = window.setTimeout(() => { optionsRef.current.onError?.('Voice connection timed out.'); disconnect(); }, 15000);
 
+      // CRITICAL: getUserMedia MUST be first async call for iOS PWA
+      console.log('[Voice] Requesting microphone...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { sampleRate: 24000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+      });
+      mediaStreamRef.current = stream;
+      console.log('[Voice] Microphone acquired');
+
+      // Get ephemeral token
+      console.log('[Voice] Fetching token...');
       const { data: tokenData, error: tokenError } = await supabase.functions.invoke('openai-realtime-token', {
         body: { agentContext: optionsRef.current.agentContext, conversationHistory: optionsRef.current.conversationHistory }
       });
       if (tokenError || !tokenData?.client_secret) throw new Error(tokenError?.message || 'Failed to get token');
       const ephemeralKey = tokenData.client_secret.value;
+      console.log('[Voice] Token received');
 
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
-      pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') { optionsRef.current.onError?.('ICE failed'); disconnect(); } };
-      pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') { optionsRef.current.onError?.('Connection lost'); disconnect(); } };
-
+      // Create audio element for playback
       const audioEl = document.createElement('audio');
-      audioEl.autoplay = true; (audioEl as any).playsInline = true; audioEl.muted = false; audioEl.volume = 1;
-      audioElementRef.current = audioEl; document.body.appendChild(audioEl);
-      pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; audioEl.play().catch(() => {}); };
+      audioEl.autoplay = true;
+      audioEl.setAttribute('playsinline', 'true');
+      audioEl.muted = false;
+      audioEl.volume = 1;
+      document.body.appendChild(audioEl);
+      audioElementRef.current = audioEl;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 24000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      mediaStreamRef.current = stream;
+      // iOS autoplay workaround
+      const unlockAudio = () => {
+        audioEl.play().catch(() => {});
+        document.removeEventListener('touchstart', unlockAudio);
+        document.removeEventListener('pointerdown', unlockAudio);
+      };
+      document.addEventListener('touchstart', unlockAudio, { once: true });
+      document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+      // Create RTCPeerConnection
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      pcRef.current = pc;
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[Voice] ICE state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') { 
+          optionsRef.current.onError?.('ICE failed'); 
+          disconnect(); 
+        }
+      };
+      pc.onconnectionstatechange = () => {
+        console.log('[Voice] Connection state:', pc.connectionState);
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') { 
+          optionsRef.current.onError?.('Connection lost'); 
+          disconnect(); 
+        }
+      };
+
+      // Handle incoming audio
+      pc.ontrack = (e) => {
+        console.log('[Voice] Got remote audio track');
+        audioEl.srcObject = e.streams[0];
+        audioEl.play().catch(() => {});
+      };
+
+      // Add mic track BEFORE creating offer
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log('[Voice] Mic track added');
 
+      // Create data channel
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
+      
       dc.onopen = () => {
+        console.log('[Voice] Data channel open');
         if (connectTimeoutRef.current) { window.clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
         updateStatus('connected');
-        userHasSpokenRef.current = false; greetedRef.current = false;
+        userHasSpokenRef.current = false; 
+        greetedRef.current = false;
+        // Proactive greeting after 500ms
         greetTimeoutRef.current = window.setTimeout(() => {
           if (greetedRef.current || userHasSpokenRef.current || dc.readyState !== 'open') return;
           greetedRef.current = true;
+          console.log('[Voice] Sending greeting prompt');
           dc.send(JSON.stringify({ type: 'response.create', response: { modalities: ['audio', 'text'], instructions: 'Greet briefly: "Aegis here. How can I help?"' } }));
         }, 500);
       };
-      dc.onmessage = (e) => { try { handleRealtimeEvent(JSON.parse(e.data)); } catch {} };
-      dc.onerror = () => optionsRef.current.onError?.('Data channel error');
-      dc.onclose = () => updateStatus('idle');
+      dc.onmessage = (e) => { 
+        try { handleRealtimeEvent(JSON.parse(e.data)); } 
+        catch (err) { console.error('[Voice] Parse error:', err); } 
+      };
+      dc.onerror = (e) => {
+        console.error('[Voice] Data channel error:', e);
+        optionsRef.current.onError?.('Data channel error');
+      };
+      dc.onclose = () => {
+        console.log('[Voice] Data channel closed');
+        updateStatus('idle');
+      };
 
+      // Create SDP offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.log('[Voice] SDP offer created');
+
+      // Wait for ICE gathering to complete
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+        } else {
+          const checkIce = () => {
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', checkIce);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', checkIce);
+          setTimeout(resolve, 3000); // Fallback timeout
+        }
+      });
+      console.log('[Voice] ICE gathering complete');
+
+      // Send SDP to OpenAI
+      console.log('[Voice] Sending SDP to OpenAI...');
       const sdpRes = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17', {
-        method: 'POST', headers: { 'Authorization': `Bearer ${ephemeralKey}`, 'Content-Type': 'application/sdp' }, body: offer.sdp
+        method: 'POST', 
+        headers: { 'Authorization': `Bearer ${ephemeralKey}`, 'Content-Type': 'application/sdp' }, 
+        body: pc.localDescription?.sdp
       });
       if (!sdpRes.ok) throw new Error(await sdpRes.text());
-      await pc.setRemoteDescription({ type: 'answer', sdp: await sdpRes.text() });
+      
+      const answerSdp = await sdpRes.text();
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      console.log('[Voice] WebRTC connected!');
+      
     } catch (error) {
+      console.error('[Voice] Connection failed:', error);
       if (connectTimeoutRef.current) { window.clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
       optionsRef.current.onError?.(error instanceof Error ? error.message : 'Connection failed');
-      updateStatus('idle'); disconnect();
+      updateStatus('idle'); 
+      disconnect();
     }
   }, [updateStatus, disconnect, handleRealtimeEvent]);
 
