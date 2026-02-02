@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAgentChat, AGENT_CONFIGS, AgentConfig } from "@/hooks/useAgentChat";
-import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
+import { useOpenAIRealtime } from "@/components/voice/useOpenAIRealtime";
 import { useFortressPlatformData, generatePlatformSummary } from "@/hooks/useFortressPlatformData";
 import { VoiceMode } from "./VoiceMode";
 
