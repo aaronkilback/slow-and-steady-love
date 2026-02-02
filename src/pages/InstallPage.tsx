@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Download, Shield, Smartphone, Check, Share, Plus, MoreVertical, Mic, Settings } from "lucide-react";
+import { Download, Shield, Smartphone, Check, Share, Plus, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -182,62 +182,6 @@ export default function InstallPage() {
           </motion.div>
         )}
 
-        {/* iOS Microphone Permission Guide */}
-        {isIOS && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="p-6 space-y-4 border-primary/30 bg-primary/5">
-              <h2 className="font-semibold text-foreground flex items-center gap-2">
-                <Mic className="h-5 w-5 text-primary" />
-                Enable Microphone for Voice Mode
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                To always allow microphone access without repeated prompts:
-              </p>
-              <ol className="space-y-3 text-sm">
-                <li className="flex items-start gap-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                    1
-                  </span>
-                  <span className="text-muted-foreground">
-                    Open iPhone <Settings className="inline h-4 w-4 mx-1" /> <strong>Settings</strong>
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                    2
-                  </span>
-                  <span className="text-muted-foreground">
-                    Scroll down and tap <strong>Safari</strong> (or your browser)
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                    3
-                  </span>
-                  <span className="text-muted-foreground">
-                    Tap <strong>Microphone</strong> under "Settings for Websites"
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                    4
-                  </span>
-                  <span className="text-muted-foreground">
-                    Select <strong>Allow</strong> to enable for all sites, or find Fortress and set to <strong>Allow</strong>
-                  </span>
-                </li>
-              </ol>
-              <p className="text-xs text-muted-foreground pt-2 border-t border-border">
-                💡 After installing to Home Screen, use the app from there for best voice experience.
-              </p>
-            </Card>
-          </motion.div>
-        )}
-
         {/* Features */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -254,7 +198,6 @@ export default function InstallPage() {
               "Fast loading — opens instantly like a native app",
               "Secure — end-to-end encrypted communications",
               "Real-time — instant alerts and notifications",
-              "Voice AI — hands-free Aegis conversations",
             ].map((feature, i) => (
               <div key={i} className="flex items-center gap-3 text-sm">
                 <Check className="h-4 w-4 text-primary shrink-0" />

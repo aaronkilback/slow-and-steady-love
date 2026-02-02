@@ -472,43 +472,6 @@ export function useAgentChat(agentId: string = "aegis") {
     loadConversations();
   }, [currentConversationId]);
 
-  /**
-   * Save a voice message (transcript) to the conversation history.
-   * Creates a new conversation if none exists.
-   */
-  const saveVoiceMessage = useCallback(async (role: "user" | "assistant", content: string): Promise<boolean> => {
-    if (!content.trim()) return false;
-
-    try {
-      let convId = currentConversationId;
-      
-      // Create conversation if none exists
-      if (!convId) {
-        convId = await createConversation();
-        if (!convId) return false;
-      }
-
-      // Save the message
-      const savedMsg = await saveMessage(convId, role, content.trim());
-      
-      // Add to local messages state
-      setMessages(prev => [...prev, { 
-        ...savedMsg, 
-        role: savedMsg.role as "user" | "assistant" 
-      }]);
-
-      // Update conversation title if this is the first user message
-      if (role === "user" && messages.length === 0) {
-        updateConversationTitle(convId, content.trim());
-      }
-
-      return true;
-    } catch (e) {
-      console.error("[Voice] Failed to save message:", e);
-      return false;
-    }
-  }, [currentConversationId, messages.length]);
-
   return {
     conversations,
     currentConversationId,
@@ -519,7 +482,6 @@ export function useAgentChat(agentId: string = "aegis") {
     startNewConversation,
     selectConversation,
     deleteConversation,
-    saveVoiceMessage,
     agentConfig,
   };
 }
