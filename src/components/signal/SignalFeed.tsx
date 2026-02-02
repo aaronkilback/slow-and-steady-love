@@ -100,7 +100,7 @@ function SignalCard({ signal }: { signal: SignalType }) {
                   {/* Full description */}
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
-                    <p className="text-sm text-foreground leading-relaxed">
+                    <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                       {signal.description}
                     </p>
                   </div>
@@ -109,13 +109,55 @@ function SignalCard({ signal }: { signal: SignalType }) {
                   {signal.details && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground mb-1">Details</p>
-                      <p className="text-sm text-foreground leading-relaxed">
+                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
                         {signal.details}
                       </p>
                     </div>
                   )}
+
+                  {/* Status if available */}
+                  {signal.status && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Status</p>
+                      <Badge variant="outline" className="capitalize">{signal.status}</Badge>
+                    </div>
+                  )}
+
+                  {/* Assignee if available */}
+                  {signal.assignee && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Assigned To</p>
+                      <p className="text-sm text-foreground font-medium">{signal.assignee}</p>
+                    </div>
+                  )}
                   
-                  {/* Metadata */}
+                  {/* Metadata section - show all extra platform data */}
+                  {signal.metadata && Object.keys(signal.metadata).length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Additional Data</p>
+                      <div className="bg-secondary/50 rounded-lg p-2 text-xs font-mono overflow-x-auto">
+                        <pre className="whitespace-pre-wrap text-foreground">
+                          {JSON.stringify(signal.metadata, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Raw data access - complete platform signal */}
+                  {signal.raw && (
+                    <details className="text-xs">
+                      <summary className="text-muted-foreground cursor-pointer hover:text-primary transition-colors">
+                        View raw signal data
+                      </summary>
+                      <div className="mt-2 bg-secondary/50 rounded-lg p-2 font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                        <pre className="whitespace-pre-wrap text-foreground text-[10px]">
+                          {JSON.stringify(signal.raw, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  )}
+                  
+                  {/* Core Metadata */}
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <p className="text-muted-foreground">Source</p>

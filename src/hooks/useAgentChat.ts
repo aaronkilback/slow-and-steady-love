@@ -187,17 +187,33 @@ export function useAgentChat(agentId: string = "aegis") {
     if (!userId) return;
 
     for (const table of FORTRESS_CONVERSATION_TABLES) {
+      // Fetch ALL conversations for this user from Fortress platform
+      // Agent-specific conversations are filtered by agent_id, but also include
+      // conversations that match "Chat with [AgentName]" pattern for historical context
       const { data, error } = await fortressClient
         .from(table)
         .select("id, title, updated_at, agent_id")
         .eq("user_id", userId)
-        .eq("agent_id", agentId)
         .order("updated_at", { ascending: false });
 
       if (!error && data) {
-        setConversations(data);
-        if (data.length > 0 && !currentConversationId) {
-          setCurrentConversationId(data[0].id);
+        // Filter conversations for this specific agent
+        // Match by agent_id OR by title pattern "Chat with [AgentName]"
+        const agentName = agentConfig.name.toLowerCase();
+        const filteredConversations = data.filter((conv: any) => {
+          if (conv.agent_id === agentId) return true;
+          if (conv.title) {
+            const titleLower = conv.title.toLowerCase();
+            // Match "Chat with AgentName" or just agent name in title
+            if (titleLower.includes(`chat with ${agentName}`)) return true;
+            if (titleLower.includes(agentName) && agentId !== "aegis") return true;
+          }
+          return false;
+        });
+
+        setConversations(filteredConversations);
+        if (filteredConversations.length > 0 && !currentConversationId) {
+          setCurrentConversationId(filteredConversations[0].id);
         }
         return;
       }
