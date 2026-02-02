@@ -11,17 +11,73 @@ interface UseOpenAIRealtimeOptions {
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'speaking'>('idle');
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
+  const [micLevel, setMicLevel] = useState(0); // 0-1 normalized mic input level
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
   
   useEffect(() => { 
     optionsRef.current = options; 
   }, [options]);
+
+  // Mic level analyser loop
+  const startMicLevelMonitor = useCallback((stream: MediaStream) => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.5;
+      analyserRef.current = analyser;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      
+      const updateLevel = () => {
+        if (!analyserRef.current) return;
+        
+        analyserRef.current.getByteFrequencyData(dataArray);
+        // Calculate RMS for a better representation of loudness
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i] * dataArray[i];
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        const normalized = Math.min(1, rms / 128); // Normalize to 0-1
+        setMicLevel(normalized);
+        
+        animationFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+      
+      updateLevel();
+      console.log('[Realtime] Mic level monitor started');
+    } catch (err) {
+      console.warn('[Realtime] Could not start mic level monitor:', err);
+    }
+  }, []);
+
+  const stopMicLevelMonitor = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setMicLevel(0);
+  }, []);
 
   // Request Wake Lock to prevent screen from sleeping during voice session
   const requestWakeLock = useCallback(async () => {
@@ -53,6 +109,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const disconnect = useCallback(() => {
     console.log('[Realtime] Disconnecting...');
     
+    // Stop mic level monitor
+    stopMicLevelMonitor();
+    
     // Release wake lock
     releaseWakeLock();
     
@@ -80,7 +139,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     
     setIsAgentSpeaking(false);
     setStatus('idle');
-  }, [releaseWakeLock]);
+  }, [releaseWakeLock, stopMicLevelMonitor]);
 
   /**
    * CRITICAL: This function MUST be called directly from a button onClick handler.
@@ -112,6 +171,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       });
       mediaStreamRef.current = stream;
       console.log('[Realtime] Microphone access granted');
+
+      // Start mic level monitor for visual feedback
+      startMicLevelMonitor(stream);
 
       // Request Wake Lock to keep screen awake during voice session (best-effort; may be unsupported on iOS)
       // Not awaited to avoid coupling mic activation to this capability.
@@ -299,7 +361,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   
   return { 
     status, 
-    isAgentSpeaking, 
+    isAgentSpeaking,
+    micLevel,
     connect, 
     disconnect, 
     isConnected: status === 'connected' || status === 'speaking',
