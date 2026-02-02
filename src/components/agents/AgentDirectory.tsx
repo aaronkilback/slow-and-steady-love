@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { Shield, Eye, Radio, Search, User, Bot, MessageCircle, Loader2, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useAgents, useOperators, useAgentConversationAgents, Agent, Operator } from "@/hooks/useFortressData";
+import { useToast } from "@/hooks/use-toast";
 
 type AgentStatus = "online" | "busy" | "offline";
 
@@ -63,9 +65,15 @@ const agentIcons: Record<string, React.ElementType> = {
   monitor: Radio,
 };
 
-function AgentCard({ agent }: { agent: Agent }) {
+function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => void }) {
   const status = statusConfig[agent.status || "offline"];
   const Icon = agentIcons[agent.id] || Shield;
+
+  const handleChat = () => {
+    if (agent.status !== "offline") {
+      onChat(agent);
+    }
+  };
 
   return (
     <motion.div
@@ -74,7 +82,10 @@ function AgentCard({ agent }: { agent: Agent }) {
       whileHover={{ scale: 1.01 }}
       transition={{ duration: 0.2 }}
     >
-      <Card className="p-4 border-border bg-card hover:bg-card/80 transition-colors">
+      <Card 
+        className="p-4 border-border bg-card hover:bg-card/80 transition-colors cursor-pointer"
+        onClick={handleChat}
+      >
         <div className="flex items-start gap-3">
           <div className={cn(
             "relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full",
@@ -119,6 +130,10 @@ function AgentCard({ agent }: { agent: Agent }) {
             size="icon"
             className="shrink-0"
             disabled={agent.status === "offline"}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleChat();
+            }}
           >
             <MessageCircle className="h-5 w-5" />
           </Button>
@@ -128,7 +143,7 @@ function AgentCard({ agent }: { agent: Agent }) {
   );
 }
 
-function OperatorCard({ operator }: { operator: Operator }) {
+function OperatorCard({ operator, onChat }: { operator: Operator; onChat: (operator: Operator) => void }) {
   const status = statusConfig[operator.status || "offline"];
   const initials = operator.full_name
     .split(" ")
@@ -137,6 +152,12 @@ function OperatorCard({ operator }: { operator: Operator }) {
     .slice(0, 2)
     .toUpperCase();
 
+  const handleChat = () => {
+    if (operator.status !== "offline") {
+      onChat(operator);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -144,7 +165,10 @@ function OperatorCard({ operator }: { operator: Operator }) {
       whileHover={{ scale: 1.01 }}
       transition={{ duration: 0.2 }}
     >
-      <Card className="p-4 border-border bg-card hover:bg-card/80 transition-colors">
+      <Card 
+        className="p-4 border-border bg-card hover:bg-card/80 transition-colors cursor-pointer"
+        onClick={handleChat}
+      >
         <div className="flex items-start gap-3">
           <div className="relative">
             <Avatar className="h-12 w-12">
@@ -174,6 +198,10 @@ function OperatorCard({ operator }: { operator: Operator }) {
             size="icon"
             className="shrink-0"
             disabled={operator.status === "offline"}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleChat();
+            }}
           >
             <MessageCircle className="h-5 w-5" />
           </Button>
@@ -184,6 +212,8 @@ function OperatorCard({ operator }: { operator: Operator }) {
 }
 
 export function AgentDirectory() {
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const { data: fortressAgents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents();
   const { data: conversationAgents = [], isLoading: conversationAgentsLoading, refetch: refetchConversationAgents } = useAgentConversationAgents();
   const { data: operators = [], isLoading: operatorsLoading, refetch: refetchOperators } = useOperators();
@@ -219,6 +249,32 @@ export function AgentDirectory() {
   });
   
   const aiAgents = mergedAgents;
+
+  const handleAgentChat = (agent: Agent) => {
+    if (agent.id === "aegis") {
+      // Navigate directly to Aegis
+      navigate("/");
+    } else {
+      // Navigate to Aegis with agent context - Aegis will handle routing to the agent
+      toast({
+        title: `Connecting to ${agent.name}`,
+        description: "Opening chat with agent...",
+      });
+      // Store selected agent in session for Aegis to pick up
+      sessionStorage.setItem("selectedAgent", JSON.stringify(agent));
+      navigate("/");
+    }
+  };
+
+  const handleOperatorChat = (operator: Operator) => {
+    toast({
+      title: `Messaging ${operator.full_name}`,
+      description: "Opening direct message...",
+    });
+    // Navigate to messages with operator context
+    sessionStorage.setItem("selectedOperator", JSON.stringify(operator));
+    navigate("/messages");
+  };
 
   const handleRefresh = () => {
     refetchAgents();
@@ -264,7 +320,7 @@ export function AgentDirectory() {
             </h2>
             <div className="space-y-3">
               {aiAgents.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} />
+                <AgentCard key={agent.id} agent={agent} onChat={handleAgentChat} />
               ))}
             </div>
           </div>
@@ -285,7 +341,7 @@ export function AgentDirectory() {
                 </Card>
               ) : (
                 operators.map((operator) => (
-                  <OperatorCard key={operator.id} operator={operator} />
+                  <OperatorCard key={operator.id} operator={operator} onChat={handleOperatorChat} />
                 ))
               )}
             </div>
