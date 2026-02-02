@@ -1,8 +1,13 @@
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+};
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
+    console.log('[openai-realtime-token] request');
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) return new Response(JSON.stringify({ error: 'OpenAI API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
@@ -17,7 +22,9 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: 'gpt-4o-realtime-preview-2024-12-17',
         modalities: ['audio', 'text'],
-        voice: 'ash',
+        // NOTE: Realtime Sessions does not support 'onyx'.
+        // Supported voices include: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar.
+        voice: 'cedar',
         input_audio_format: 'pcm16',
         output_audio_format: 'pcm16',
         instructions,
