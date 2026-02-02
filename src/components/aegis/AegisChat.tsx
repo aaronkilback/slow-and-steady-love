@@ -106,11 +106,6 @@ You have full access to platform intelligence. Reference signals, team status, a
     },
     onAgentResponseComplete: (text) => {
       setAegisResponse(text);
-      // Clear after a delay
-      setTimeout(() => {
-        setAegisResponse("");
-        setCurrentTranscript("");
-      }, 3000);
     },
     onError: (error) => {
       console.error("[Voice] Error:", error);
@@ -154,8 +149,7 @@ You have full access to platform intelligence. Reference signals, team status, a
     disconnectRealtime();
     setVoiceModeOpen(false);
     setVoiceError(null);
-    setCurrentTranscript("");
-    setAegisResponse("");
+    // Keep last transcript/response visible after closing for easier debugging.
   }, [disconnectRealtime]);
 
   // Scroll to bottom helper
