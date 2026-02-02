@@ -301,6 +301,32 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         console.log('[Realtime] Data channel open - connected!');
         setStatus('connected');
 
+        // Explicitly configure the session after connect.
+        // On iOS PWA we sometimes see speech events + response.done with no transcript/output unless we do this.
+        try {
+          dc.send(
+            JSON.stringify({
+              type: 'session.update',
+              session: {
+                // Ensure both text + audio are permitted outputs
+                output_modalities: ['audio', 'text'],
+                // Ensure server-side transcription is enabled
+                input_audio_transcription: { model: 'whisper-1' },
+                // Prefer VAD-managed turns, but we also send response.create on speech_stopped/transcription
+                turn_detection: {
+                  type: 'server_vad',
+                  threshold: 0.5,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 800,
+                  create_response: true,
+                },
+              },
+            })
+          );
+        } catch (err) {
+          console.warn('[Realtime] session.update failed:', err);
+        }
+
         // Some realtime sessions won’t emit responses unless there is at least one conversation item.
         // Seed a short “greeting” message and then request a response.
         try {
