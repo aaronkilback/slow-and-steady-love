@@ -79,6 +79,31 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     setMicLevel(0);
   }, []);
 
+  const waitForIceGatheringComplete = useCallback((pc: RTCPeerConnection, timeoutMs = 2500) => {
+    // For non-trickle HTTP SDP exchange, we must wait until ICE candidates are embedded
+    // in pc.localDescription.sdp. Otherwise the connection can appear “connected” but
+    // media/data never flow reliably (especially on mobile networks).
+    if (pc.iceGatheringState === 'complete') return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        pc.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      };
+
+      const onChange = () => {
+        console.log('[Realtime] ICE gathering state:', pc.iceGatheringState);
+        if (pc.iceGatheringState === 'complete') finish();
+      };
+
+      pc.addEventListener('icegatheringstatechange', onChange);
+      setTimeout(finish, timeoutMs);
+    });
+  }, []);
+
   // Request Wake Lock to prevent screen from sleeping during voice session
   const requestWakeLock = useCallback(async () => {
     if ('wakeLock' in navigator) {
@@ -339,6 +364,13 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
+      // IMPORTANT: wait for ICE candidates to be gathered into localDescription.sdp
+      await waitForIceGatheringComplete(pc);
+      const localSdp = pc.localDescription?.sdp;
+      if (!localSdp) {
+        throw new Error('Missing local SDP after ICE gathering');
+      }
+
       // Step 8: Send offer to OpenAI and get answer
       console.log('[Realtime] Sending offer to OpenAI...');
       const sdpResp = await fetch(
@@ -349,7 +381,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             'Authorization': `Bearer ${data.client_secret.value}`, 
             'Content-Type': 'application/sdp' 
           }, 
-          body: offer.sdp 
+          body: localSdp 
         }
       );
       
