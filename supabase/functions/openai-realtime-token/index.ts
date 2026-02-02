@@ -29,7 +29,8 @@ Deno.serve(async (req) => {
         output_audio_format: 'pcm16',
         instructions: `You are AEGIS, an AI voice assistant. Be helpful and conversational.${agentContext ? `\n\nContext: ${agentContext}` : ''}`,
         input_audio_transcription: { model: 'whisper-1' },
-        turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 800, create_response: true }
+        // iOS can get stuck in "speech_started" with noisy inputs; slightly higher threshold + shorter silence helps
+        turn_detection: { type: 'server_vad', threshold: 0.65, prefix_padding_ms: 200, silence_duration_ms: 500, create_response: true }
       }),
     });
 

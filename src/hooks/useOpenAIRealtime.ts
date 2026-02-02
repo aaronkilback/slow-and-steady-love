@@ -17,6 +17,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [agentResponse, setAgentResponse] = useState('');
+
+  // Keep a ref in sync so timeouts can check the latest status reliably.
+  const statusRef = useRef<typeof status>('idle');
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
@@ -26,6 +29,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const connectTimeoutRef = useRef<number | null>(null);
   const greetTimeoutRef = useRef<number | null>(null);
   const responseFallbackRef = useRef<number | null>(null);
+  const listeningWatchdogRef = useRef<number | null>(null);
   const userHasSpokenRef = useRef(false);
   const greetedRef = useRef(false);
   
@@ -35,9 +39,42 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   }, [options]);
 
   const updateStatus = useCallback((newStatus: typeof status) => {
+    statusRef.current = newStatus;
     setStatus(newStatus);
     optionsRef.current.onStatusChange?.(newStatus);
   }, []);
+
+  const clearListeningWatchdog = useCallback(() => {
+    if (listeningWatchdogRef.current) {
+      window.clearTimeout(listeningWatchdogRef.current);
+      listeningWatchdogRef.current = null;
+    }
+  }, []);
+
+  const armListeningWatchdog = useCallback(() => {
+    clearListeningWatchdog();
+
+    // If iOS never emits speech_stopped (common), force a commit + response.
+    listeningWatchdogRef.current = window.setTimeout(() => {
+      const dc = dcRef.current;
+      if (!dc || dc.readyState !== 'open') return;
+
+      if (statusRef.current === 'listening') {
+        console.warn('[Voice] Watchdog: stuck in listening — forcing commit + response');
+        updateStatus('thinking');
+        try {
+          dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        } catch {
+          // ignore
+        }
+        try {
+          dc.send(JSON.stringify({ type: 'response.create' }));
+        } catch {
+          // ignore
+        }
+      }
+    }, 2500);
+  }, [clearListeningWatchdog, updateStatus]);
 
   const handleRealtimeEvent = useCallback((event: Record<string, unknown>) => {
     console.log('Realtime event:', event.type, event);
@@ -63,11 +100,14 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
         updateStatus('listening');
         setIsAgentSpeaking(false);
+        armListeningWatchdog();
         break;
 
       case 'input_audio_buffer.speech_stopped':
         console.log('User stopped speaking, requesting response immediately...');
         updateStatus('thinking');
+
+        clearListeningWatchdog();
         
         // CRITICAL FIX: Immediately request a response when speech stops
         // Server VAD with create_response:true isn't always reliable on iOS
@@ -91,6 +131,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       case 'input_audio_buffer.committed':
         console.log('Audio buffer committed to server');
         updateStatus('thinking');
+        clearListeningWatchdog();
         break;
 
       case 'conversation.item.input_audio_transcription.completed':
@@ -99,6 +140,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           console.log('User transcript:', transcriptText);
           setTranscript(transcriptText);
           optionsRef.current.onTranscript?.(transcriptText, true);
+          clearListeningWatchdog();
         }
         break;
 
@@ -124,6 +166,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           window.clearTimeout(responseFallbackRef.current);
           responseFallbackRef.current = null;
         }
+        clearListeningWatchdog();
         setIsAgentSpeaking(true);
         updateStatus('speaking');
         break;
@@ -137,6 +180,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         setIsAgentSpeaking(false);
         updateStatus('connected');
         setAgentResponse('');
+        clearListeningWatchdog();
         break;
 
       case 'error':
@@ -144,6 +188,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           const errorData = (event as Record<string, unknown>).error as Record<string, unknown>;
           console.error('Realtime error:', errorData);
           optionsRef.current.onError?.(errorData?.message as string || 'Unknown error');
+          clearListeningWatchdog();
         }
         break;
 
@@ -170,6 +215,11 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     if (responseFallbackRef.current) {
       window.clearTimeout(responseFallbackRef.current);
       responseFallbackRef.current = null;
+    }
+
+    if (listeningWatchdogRef.current) {
+      window.clearTimeout(listeningWatchdogRef.current);
+      listeningWatchdogRef.current = null;
     }
 
     if (dcRef.current) {
