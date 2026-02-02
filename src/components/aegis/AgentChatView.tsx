@@ -103,18 +103,18 @@ You have full access to platform intelligence. Reference signals, team status, a
     connect: connectRealtime,
     disconnect: disconnectRealtime,
   } = useOpenAIRealtime({
-    onTranscript: async (text) => {
+    onTranscript: (text) => {
       setCurrentTranscript(text);
-      // Save user's voice transcript to chat history
+      // Save user's voice transcript to chat history (fire-and-forget, don't block voice)
       if (text.trim()) {
-        await saveVoiceMessage("user", text);
+        saveVoiceMessage("user", text).catch(console.error);
       }
     },
-    onAgentResponseComplete: async (text) => {
+    onAgentResponseComplete: (text) => {
       setAegisResponse(text);
-      // Save Aegis voice response to chat history
+      // Save Aegis voice response to chat history (fire-and-forget, don't block voice)
       if (text.trim()) {
-        await saveVoiceMessage("assistant", text);
+        saveVoiceMessage("assistant", text).catch(console.error);
       }
       setTimeout(() => {
         setAegisResponse("");

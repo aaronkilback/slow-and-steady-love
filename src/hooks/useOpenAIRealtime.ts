@@ -165,16 +165,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       };
 
       // Step 5: Add microphone tracks to peer connection
-      // Verify audio track is active before adding
-      const audioTracks = stream.getAudioTracks();
-      console.log('[Realtime] Audio tracks:', audioTracks.length, 'enabled:', audioTracks[0]?.enabled);
-      
-      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
-        throw new Error('Microphone not available - please check permissions');
-      }
-      
-      audioTracks.forEach(track => {
-        console.log('[Realtime] Adding audio track:', track.label, 'muted:', track.muted);
+      stream.getTracks().forEach(track => {
+        console.log('[Realtime] Adding track:', track.kind, track.label);
         pc.addTrack(track, stream);
       });
 
