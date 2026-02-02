@@ -12,6 +12,54 @@ interface UseOpenAIRealtimeOptions {
   agentContext?: string;
 }
 
+// Detect iOS device
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+}
+
+// Detect PWA standalone mode (iOS Home Screen app)
+function isPWAStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  const navStandalone = Boolean((navigator as unknown as { standalone?: boolean }).standalone);
+  const mediaStandalone =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(display-mode: standalone)").matches;
+  return navStandalone || mediaStandalone;
+}
+
+// Resume AudioContext (iOS suspends until user gesture)
+async function ensureAudioContextActive(): Promise<void> {
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    
+    const audioContext = new AudioContextClass();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    // Close immediately - we just needed to unlock audio
+    await audioContext.close();
+  } catch (e) {
+    console.warn("[Realtime] AudioContext resume failed:", e);
+  }
+}
+
+// Get iOS-optimized audio constraints
+function getAudioConstraints(): MediaStreamConstraints {
+  const isIOS = isIOSDevice();
+  
+  return {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      // iOS Safari requires specific sample rate for WebRTC
+      ...(isIOS && { sampleRate: 24000 }),
+    },
+  };
+}
+
 export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const [status, setStatus] = useState<RealtimeStatus>("idle");
   const [isSupported, setIsSupported] = useState(true);
@@ -38,8 +86,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   }, [options]);
 
   const waitForIceGatheringComplete = useCallback(async (pc: RTCPeerConnection) => {
-    // Some browsers (notably mobile Safari) may not have ICE candidates in the SDP
-    // immediately after setLocalDescription. Waiting prevents "stuck connecting".
     if (pc.iceGatheringState === "complete") return;
 
     await new Promise<void>((resolve) => {
@@ -54,7 +100,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
 
       pc.addEventListener("icegatheringstatechange", onChange);
 
-      // Safety timeout so we don't hang forever.
+      // Safety timeout
       window.setTimeout(() => {
         if (!resolved) {
           resolved = true;
@@ -66,25 +112,21 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   }, []);
 
   const disconnect = useCallback(() => {
-    // Stop microphone
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
 
-    // Close data channel
     if (dcRef.current) {
       dcRef.current.close();
       dcRef.current = null;
     }
 
-    // Close peer connection
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
 
-    // Clean up audio element
     if (audioElRef.current) {
       if (audioElMountedRef.current) {
         try {
@@ -103,6 +145,11 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     console.log("[Realtime] Disconnected");
   }, [updateStatus]);
 
+  /**
+   * CRITICAL: This function MUST be called directly from a user gesture (click/tap handler).
+   * iOS PWA mode requires getUserMedia to be initiated synchronously from user interaction.
+   * Do NOT call this from useEffect, setTimeout, or async callbacks.
+   */
   const connect = useCallback(async () => {
     if (!isSupported) {
       const msg = "WebRTC not supported in this browser";
@@ -111,44 +158,81 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       return;
     }
 
+    const isIOS = isIOSDevice();
+    const isPWA = isPWAStandalone();
+    console.log("[Realtime] connect() starting - iOS:", isIOS, "PWA:", isPWA);
+
     try {
       updateStatus("connecting");
       setLastError(null);
-      console.log("[Realtime] connect() starting");
 
-      // We do the SDP handshake via backend function to avoid client-side CORS/network blockers
-      // that commonly cause "Starting..." stalls in production.
+      // STEP 1: Resume AudioContext on user gesture (iOS requirement)
+      if (isIOS) {
+        console.log("[Realtime] Resuming AudioContext for iOS");
+        await ensureAudioContextActive();
+      }
 
-      // STUN is important for NAT traversal; without it, many real-world networks stall at "Starting..."
+      // STEP 2: Get microphone access IMMEDIATELY from user gesture
+      // This is the critical part - getUserMedia must be called synchronously
+      console.log("[Realtime] Requesting microphone (iOS-optimized constraints)");
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(getAudioConstraints());
+        streamRef.current = stream;
+        console.log("[Realtime] Microphone granted");
+      } catch (micError) {
+        console.error("[Realtime] Microphone error:", micError);
+        const isPWAMode = isPWAStandalone();
+        const errorMsg = micError instanceof Error ? micError.message : "Microphone access denied";
+        
+        // Provide helpful message for PWA users
+        if (isPWAMode && isIOS) {
+          const pwaMsg = `Microphone blocked in Home Screen app. Try opening in Safari for full voice support. (${errorMsg})`;
+          setLastError(pwaMsg);
+          options.onError?.(pwaMsg);
+        } else {
+          setLastError(errorMsg);
+          options.onError?.(errorMsg);
+        }
+        updateStatus("idle");
+        return;
+      }
+
+      // STEP 3: Create RTCPeerConnection with STUN servers
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
       });
       pcRef.current = pc;
 
-      // Audio playback element
+      // STEP 4: Create audio playback element (must be created from user gesture on iOS)
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
-      // Improves reliability on iOS/Safari
       audioEl.setAttribute("playsinline", "true");
+      audioEl.setAttribute("webkit-playsinline", "true");
       audioEl.style.display = "none";
       audioElRef.current = audioEl;
+      
       if (!audioElMountedRef.current) {
         document.body.appendChild(audioEl);
         audioElMountedRef.current = true;
       }
       
       pc.ontrack = (e) => {
+        console.log("[Realtime] Received audio track");
         audioEl.srcObject = e.streams[0];
+        // Force play on iOS
+        audioEl.play().catch((err) => {
+          console.warn("[Realtime] Audio autoplay blocked:", err);
+        });
       };
 
-      // Get microphone access
-      console.log("[Realtime] requesting microphone");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      // Add microphone tracks to peer connection
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      console.log("[Realtime] microphone granted");
 
-      // Data channel for events
+      // STEP 5: Create data channel
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
 
@@ -161,12 +245,15 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           disconnect();
         }
       };
+      
       pc.oniceconnectionstatechange = () => {
         console.log("[Realtime] iceConnectionState:", pc.iceConnectionState);
       };
+      
       pc.onicegatheringstatechange = () => {
         console.log("[Realtime] iceGatheringState:", pc.iceGatheringState);
       };
+      
       pc.onicecandidateerror = (ev) => {
         console.warn("[Realtime] ICE candidate error", ev);
       };
@@ -175,7 +262,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         console.log("[Realtime] Data channel open");
         updateStatus("connected");
         
-        // Send initial greeting request
         dc.send(JSON.stringify({
           type: "response.create",
           response: {
@@ -191,19 +277,16 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           
           switch (message.type) {
             case "response.audio_transcript.done":
-              // Agent finished speaking
               console.log("[Realtime] Agent response complete:", message.transcript);
               options.onAgentResponseComplete?.(message.transcript);
               updateStatus("listening");
               break;
               
             case "response.audio_transcript.delta":
-              // Streaming agent response text
               options.onAgentResponse?.(message.delta);
               break;
               
             case "conversation.item.input_audio_transcription.completed":
-              // User speech transcribed
               console.log("[Realtime] User transcript:", message.transcript);
               options.onTranscript?.(message.transcript, true);
               break;
@@ -250,7 +333,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         updateStatus("idle");
       };
 
-      // WebRTC handshake
+      // STEP 6: WebRTC handshake
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -282,7 +365,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       const answerSdp = data.answer_sdp as string;
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
-      console.log("[Realtime] Connection established");
+      console.log("[Realtime] Connection established successfully");
     } catch (err) {
       console.error("[Realtime] Connect error:", err);
       const msg = err instanceof Error ? err.message : "Connection failed";
@@ -308,5 +391,6 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     connect,
     disconnect,
     isConnected: status !== "idle" && status !== "connecting",
+    isIOSPWA: isIOSDevice() && isPWAStandalone(),
   };
 }
