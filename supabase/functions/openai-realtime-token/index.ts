@@ -59,7 +59,7 @@ ${agentContext ? `Current context: ${agentContext}` : ""}`;
       body: JSON.stringify({
         model: "gpt-4o-realtime-preview-2024-12-17",
         modalities: ["audio", "text"],
-        voice: "onyx", // Deep, authoritative male voice
+        voice: "ash", // Deep, authoritative male voice (closest to onyx)
         input_audio_format: "pcm16",
         output_audio_format: "pcm16",
         instructions,
