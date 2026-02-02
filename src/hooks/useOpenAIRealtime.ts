@@ -23,6 +23,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
+
+  // Collect streaming text deltas so we can still show output even if only response.done fires.
+  const responseTextRef = useRef<string>("");
   
   useEffect(() => { 
     optionsRef.current = options; 
@@ -78,6 +81,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     }
     analyserRef.current = null;
     setMicLevel(0);
+  }, []);
+
+  const extractTextFromResponseDone = useCallback((evt: any): string => {
+    // Newer realtime schema: response.done includes response.output[].content[].text
+    const out = evt?.response?.output;
+    if (Array.isArray(out)) {
+      const parts: string[] = [];
+      for (const item of out) {
+        const content = item?.content;
+        if (!Array.isArray(content)) continue;
+        for (const c of content) {
+          const t = (c?.text ?? c?.transcript) as unknown;
+          if (typeof t === 'string' && t.trim()) parts.push(t.trim());
+        }
+      }
+      if (parts.length) return parts.join('\n');
+    }
+    // Fallbacks
+    if (typeof evt?.text === 'string' && evt.text.trim()) return evt.text.trim();
+    if (typeof evt?.transcript === 'string' && evt.transcript.trim()) return evt.transcript.trim();
+    return '';
   }, []);
 
   const waitForIceGatheringComplete = useCallback((pc: RTCPeerConnection, timeoutMs = 2500) => {
@@ -304,6 +328,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           JSON.stringify({
             type: 'response.create',
             response: {
+              // Newer schema uses output_modalities; keep modalities for backwards compatibility.
+              output_modalities: ['audio', 'text'],
               modalities: ['audio', 'text'],
             },
           })
@@ -319,6 +345,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             console.log('[Realtime] Event:', d.type);
             setLastEventType(d.type);
           }
+
+          // Input audio events (helpful for iOS PWA)
+          if (d.type === 'input_audio_buffer.speech_started') {
+            // confirms audio is reaching the session
+          }
+          if (d.type === 'input_audio_buffer.speech_stopped') {
+            // If server-side VAD doesn’t auto-create a response, force one at end of turn.
+            try {
+              dcRef.current?.send(
+                JSON.stringify({
+                  type: 'response.create',
+                  response: {
+                    output_modalities: ['audio', 'text'],
+                    modalities: ['audio', 'text'],
+                  },
+                })
+              );
+            } catch {
+              // ignore
+            }
+          }
           
           // User speech transcription
           if (d.type === 'conversation.item.input_audio_transcription.completed') {
@@ -332,6 +379,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
                 JSON.stringify({
                   type: 'response.create',
                   response: {
+                    output_modalities: ['audio', 'text'],
                     modalities: ['audio', 'text'],
                   },
                 })
@@ -341,22 +389,34 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
             }
           }
           
-          // Agent response complete
-          if (d.type === 'response.audio_transcript.done') {
-            console.log('[Realtime] Agent said:', d.transcript);
-            optionsRef.current.onAgentResponseComplete?.(d.transcript || '');
+          // Streaming text output
+          if (d.type === 'response.output_text.delta') {
+            const delta = typeof d.delta === 'string' ? d.delta : '';
+            if (delta) responseTextRef.current += delta;
           }
 
-          // Some versions emit text completion events under different names
-          if (d.type === 'response.output_text.done' || d.type === 'response.text.done') {
-            if (typeof d.text === 'string' && d.text.trim()) {
-              console.log('[Realtime] Agent text:', d.text);
-              optionsRef.current.onAgentResponseComplete?.(d.text.trim());
+          if (d.type === 'response.output_text.done') {
+            const finalText =
+              (typeof d.text === 'string' && d.text.trim())
+                ? d.text.trim()
+                : responseTextRef.current.trim();
+            if (finalText) {
+              console.log('[Realtime] Agent text:', finalText);
+              optionsRef.current.onAgentResponseComplete?.(finalText);
+            }
+          }
+
+          // Audio transcript (older schema)
+          if (d.type === 'response.audio_transcript.done') {
+            const t = typeof d.transcript === 'string' ? d.transcript.trim() : '';
+            if (t) {
+              console.log('[Realtime] Agent said:', t);
+              optionsRef.current.onAgentResponseComplete?.(t);
             }
           }
           
-          // Agent is speaking
-          if (d.type === 'response.audio.delta') {
+          // Agent is speaking (support old + new event names)
+          if (d.type === 'response.audio.delta' || d.type === 'response.output_audio.delta') {
             setIsAgentSpeaking(true);
             setStatus('speaking');
           }
@@ -365,6 +425,15 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           if (d.type === 'response.done') {
             setIsAgentSpeaking(false);
             setStatus('connected');
+
+            // Final catch-all: pull any text embedded in response.done
+            const doneText = extractTextFromResponseDone(d) || responseTextRef.current.trim();
+            if (doneText) {
+              console.log('[Realtime] response.done text:', doneText);
+              optionsRef.current.onAgentResponseComplete?.(doneText);
+            }
+
+            responseTextRef.current = '';
           }
           
           // Error from API
