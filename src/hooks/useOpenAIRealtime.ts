@@ -33,16 +33,24 @@ async function ensureAudioContextActive(): Promise<void> {
   try {
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
-    
     const audioContext = new AudioContextClass();
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
-    // Close immediately - we just needed to unlock audio
-    await audioContext.close();
+    if (audioContext.state === "suspended") await audioContext.resume();
+    // NOTE: Do NOT close() here. iOS PWA can throw "object is in an invalid state" when
+    // quickly closing audio contexts during a live WebRTC startup.
   } catch (e) {
     console.warn("[Realtime] AudioContext resume failed:", e);
   }
+}
+
+function formatError(err: unknown) {
+  if (!err) return { name: "UnknownError", message: "Unknown error" };
+  if (err instanceof Error) return { name: err.name || "Error", message: err.message || String(err) };
+  // DOMException sometimes doesn't extend Error cleanly in older Safari
+  const anyErr = err as { name?: string; message?: string };
+  return {
+    name: anyErr?.name || "Error",
+    message: anyErr?.message || String(err),
+  };
 }
 
 // Get iOS-optimized audio constraints
@@ -69,6 +77,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const audioElMountedRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
+  const connectInFlightRef = useRef(false);
+  const audioContextUnlockRef = useRef(false);
 
   // Check WebRTC support
   useEffect(() => {
@@ -162,14 +172,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     const isPWA = isPWAStandalone();
     console.log("[Realtime] connect() starting - iOS:", isIOS, "PWA:", isPWA);
 
+    // Prevent re-entrancy from double taps / event duplication in iOS PWAs.
+    if (connectInFlightRef.current) return;
+    connectInFlightRef.current = true;
+
+    // If an old session exists, clear it first (avoids InvalidStateError on reused PC).
+    if (pcRef.current || dcRef.current || streamRef.current) {
+      disconnect();
+    }
+
     try {
       updateStatus("connecting");
       setLastError(null);
 
       // STEP 1: Resume AudioContext on user gesture (iOS requirement)
       if (isIOS) {
-        console.log("[Realtime] Resuming AudioContext for iOS");
-        await ensureAudioContextActive();
+        // Only do this once per session to reduce flakiness on iOS PWA.
+        if (!audioContextUnlockRef.current) {
+          console.log("[Realtime] Resuming AudioContext for iOS");
+          await ensureAudioContextActive();
+          audioContextUnlockRef.current = true;
+        }
       }
 
       // STEP 2: Get microphone access IMMEDIATELY from user gesture
@@ -183,28 +206,40 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       } catch (micError) {
         console.error("[Realtime] Microphone error:", micError);
         const isPWAMode = isPWAStandalone();
-        const errorMsg = micError instanceof Error ? micError.message : "Microphone access denied";
+        const f = formatError(micError);
+        const errorMsg = f.message || "Microphone access denied";
         
         // Provide helpful message for PWA users
         if (isPWAMode && isIOS) {
-          const pwaMsg = `Microphone blocked in Home Screen app. Try opening in Safari for full voice support. (${errorMsg})`;
+          const pwaMsg = `[getUserMedia] ${f.name}: ${errorMsg}. If this is iOS Home Screen mode, realtime may be restricted—try Safari.`;
           setLastError(pwaMsg);
           options.onError?.(pwaMsg);
         } else {
-          setLastError(errorMsg);
-          options.onError?.(errorMsg);
+          const msg = `[getUserMedia] ${f.name}: ${errorMsg}`;
+          setLastError(msg);
+          options.onError?.(msg);
         }
         updateStatus("idle");
         return;
       }
 
       // STEP 3: Create RTCPeerConnection with STUN servers
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-        ],
-      });
+      let pc: RTCPeerConnection;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+          ],
+        });
+      } catch (e) {
+        const f = formatError(e);
+        const msg = `[RTCPeerConnection] ${f.name}: ${f.message}`;
+        setLastError(msg);
+        options.onError?.(msg);
+        updateStatus("idle");
+        return;
+      }
       pcRef.current = pc;
 
       // STEP 4: Create audio playback element (must be created from user gesture on iOS)
@@ -230,7 +265,16 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       };
 
       // Add microphone tracks to peer connection
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      try {
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      } catch (e) {
+        const f = formatError(e);
+        const msg = `[addTrack] ${f.name}: ${f.message}`;
+        setLastError(msg);
+        options.onError?.(msg);
+        disconnect();
+        return;
+      }
 
       // STEP 5: Create data channel
       const dc = pc.createDataChannel("oai-events");
@@ -334,8 +378,28 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       };
 
       // STEP 6: WebRTC handshake
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      let offer: RTCSessionDescriptionInit;
+      try {
+        offer = await pc.createOffer();
+      } catch (e) {
+        const f = formatError(e);
+        const msg = `[createOffer] ${f.name}: ${f.message}`;
+        setLastError(msg);
+        options.onError?.(msg);
+        disconnect();
+        return;
+      }
+
+      try {
+        await pc.setLocalDescription(offer);
+      } catch (e) {
+        const f = formatError(e);
+        const msg = `[setLocalDescription] ${f.name}: ${f.message}`;
+        setLastError(msg);
+        options.onError?.(msg);
+        disconnect();
+        return;
+      }
 
       await waitForIceGatheringComplete(pc);
 
@@ -363,15 +427,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       }
 
       const answerSdp = data.answer_sdp as string;
-      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      try {
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      } catch (e) {
+        const f = formatError(e);
+        const msg = `[setRemoteDescription] ${f.name}: ${f.message}`;
+        setLastError(msg);
+        options.onError?.(msg);
+        disconnect();
+        return;
+      }
 
       console.log("[Realtime] Connection established successfully");
     } catch (err) {
       console.error("[Realtime] Connect error:", err);
-      const msg = err instanceof Error ? err.message : "Connection failed";
+      const f = formatError(err);
+      const msg = `[connect] ${f.name}: ${f.message}`;
       setLastError(msg);
       options.onError?.(msg);
       updateStatus("idle");
+    } finally {
+      connectInFlightRef.current = false;
     }
   }, [disconnect, isSupported, options, updateStatus, waitForIceGatheringComplete]);
 
