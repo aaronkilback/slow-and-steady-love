@@ -97,12 +97,10 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Starting connection...');
       setStatus('connecting');
 
-      // Request Wake Lock to keep screen awake during voice session (iOS + Android)
-      await requestWakeLock();
-
-      // CRITICAL (iOS PWA): Initiate microphone capture immediately from the click stack.
-      // Do this BEFORE any network awaits to avoid losing the user-gesture requirement.
-      console.log('[Realtime] Requesting microphone...');
+      // CRITICAL (iOS Safari / iOS PWA): Initiate microphone capture as the FIRST awaited call.
+      // Do NOT await anything (network, wake lock, timers) before getUserMedia, or iOS may
+      // show "listening" UI while the mic never actually becomes active.
+      console.log('[Realtime] Requesting microphone (must be first await)...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 24000,
@@ -114,6 +112,10 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       });
       mediaStreamRef.current = stream;
       console.log('[Realtime] Microphone access granted');
+
+      // Request Wake Lock to keep screen awake during voice session (best-effort; may be unsupported on iOS)
+      // Not awaited to avoid coupling mic activation to this capability.
+      requestWakeLock().catch(() => {});
       
       // Step 1: Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
@@ -127,25 +129,50 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Got session token');
 
       // Step 2: Create RTCPeerConnection
-      const pc = new RTCPeerConnection();
+      // Add a STUN server for more reliable ICE negotiation on mobile networks.
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
       pcRef.current = pc;
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[Realtime] ICE state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          optionsRef.current.onError?.('Voice connection lost (network/ICE).');
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log('[Realtime] Connection state:', pc.connectionState);
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          optionsRef.current.onError?.('Voice connection lost.');
+        }
+      };
 
       // Step 3: Create audio element for playback (iOS PWA compatible)
       const audioEl = document.createElement('audio');
       audioEl.autoplay = true;
+      // iOS often blocks first audio output unless you "unlock" it with a user gesture.
+      // Start muted and attempt to play immediately (still within the original tap handler).
+      audioEl.muted = true;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (audioEl as any).playsInline = true;
       audioEl.setAttribute('playsinline', 'true');
       audioEl.setAttribute('webkit-playsinline', 'true');
       audioElementRef.current = audioEl;
       document.body.appendChild(audioEl);
+      audioEl.play().catch(() => {
+        // Ignore; we'll retry after the remote track arrives.
+      });
 
       // Step 4: Handle incoming audio track
       pc.ontrack = (e) => {
         console.log('[Realtime] Received audio track');
         audioEl.srcObject = e.streams[0];
+        // Unmute once we have actual audio and try to play.
+        audioEl.muted = false;
         audioEl.play().catch(() => {
-          // iOS might block autoplay, add touch listener as fallback
+          // iOS might still block; require one additional user interaction.
           window.addEventListener('pointerdown', () => audioEl.play(), { once: true });
         });
       };
