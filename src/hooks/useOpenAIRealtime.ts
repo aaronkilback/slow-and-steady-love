@@ -102,8 +102,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Requesting microphone...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 24000,
-          channelCount: 1,
+          // Avoid strict constraints on iOS; let the OS pick the native format.
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true, // Helps with iOS audio levels
@@ -134,6 +133,13 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         ],
       });
       pcRef.current = pc;
+
+      // Ensure we negotiate both directions explicitly (helps some iOS/WebRTC stacks)
+      try {
+        pc.addTransceiver('audio', { direction: 'sendrecv' });
+      } catch {
+        // Ignore if not supported; adding a track will still create a transceiver.
+      }
 
       // Monitor ICE connection state
       pc.oniceconnectionstatechange = () => {
@@ -167,6 +173,12 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       // Step 5: Add microphone tracks to peer connection
       stream.getTracks().forEach(track => {
         console.log('[Realtime] Adding track:', track.kind, track.label);
+        // Some iOS edge cases leave tracks disabled; force enabled.
+        track.enabled = true;
+
+        track.addEventListener?.('ended', () => console.log('[Realtime] Track ended:', track.kind));
+        track.addEventListener?.('mute', () => console.log('[Realtime] Track muted:', track.kind));
+        track.addEventListener?.('unmute', () => console.log('[Realtime] Track unmuted:', track.kind));
         pc.addTrack(track, stream);
       });
 
@@ -193,9 +205,19 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           const d = JSON.parse(e.data);
           
           // User speech transcription
+          if (d.type === 'conversation.item.input_audio_transcription.delta') {
+            // Optional: could stream partials; we keep it minimal to avoid UI churn.
+            // console.log('[Realtime] User transcription delta:', d.delta);
+          }
+
           if (d.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('[Realtime] User said:', d.transcript);
             optionsRef.current.onTranscript?.(d.transcript);
+          }
+
+          if (d.type === 'conversation.item.input_audio_transcription.failed') {
+            console.error('[Realtime] Transcription failed:', d.error);
+            optionsRef.current.onError?.(d.error?.message || 'Transcription failed');
           }
           
           // Agent response complete
