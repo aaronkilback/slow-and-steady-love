@@ -58,8 +58,27 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
    */
   const connect = useCallback(async () => {
     try {
+      // Prevent duplicate connects (double-taps, rerenders)
+      if (pcRef.current || status === 'connecting' || status === 'connected' || status === 'speaking') {
+        return;
+      }
+
       console.log('[Realtime] Starting connection...');
       setStatus('connecting');
+
+      // CRITICAL (iOS PWA): Initiate microphone capture immediately from the click stack.
+      // Do this BEFORE any network awaits to avoid losing the user-gesture requirement.
+      console.log('[Realtime] Requesting microphone...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 24000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      mediaStreamRef.current = stream;
+      console.log('[Realtime] Microphone access granted');
       
       // Step 1: Get ephemeral token from edge function
       const { data, error } = await supabase.functions.invoke('openai-realtime-token', { 
@@ -96,19 +115,8 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         });
       };
 
-      // Step 5: Get microphone (MUST be called from user gesture for iOS PWA)
-      console.log('[Realtime] Requesting microphone...');
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          sampleRate: 24000, 
-          channelCount: 1, 
-          echoCancellation: true, 
-          noiseSuppression: true 
-        } 
-      });
-      mediaStreamRef.current = stream;
+      // Step 5: Add microphone tracks to peer connection
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
-      console.log('[Realtime] Microphone access granted');
 
       // Step 6: Create data channel for events
       const dc = pc.createDataChannel('oai-events');
@@ -207,7 +215,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       setStatus('idle');
       disconnect();
     }
-  }, [disconnect]);
+  }, [disconnect, status]);
 
   // Cleanup on unmount
   useEffect(() => () => disconnect(), [disconnect]);
