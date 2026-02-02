@@ -118,10 +118,12 @@ export function useAgentConversationAgents() {
       let lastError: any = null;
 
       for (const table of TABLE_CANDIDATES) {
+        // Only select title - agent_id may not exist on Fortress table
         const resp = await fortressClient
           .from(table)
-          .select("title, agent_id")
-          .order("updated_at", { ascending: false });
+          .select("title")
+          .order("updated_at", { ascending: false })
+          .limit(200);
 
         if (!resp.error) {
           data = resp.data as any[];
@@ -131,7 +133,9 @@ export function useAgentConversationAgents() {
 
         lastError = resp.error;
         const code = (resp.error as any)?.code;
-        if (code && code !== "PGRST205" && code !== "42P01") break;
+        // Skip to next table if this one doesn't exist
+        if (code === "PGRST205" || code === "42P01") continue;
+        break;
       }
 
       if (!data) {
@@ -142,16 +146,16 @@ export function useAgentConversationAgents() {
       // Extract unique agent names from conversation titles like "Chat with RYAN-INTEL"
       // and from agent_id field
       const agentNames = new Set<string>();
-      (data || []).forEach((conv: { title: string | null; agent_id?: string | null }) => {
-        // Check agent_id first
-        if (conv.agent_id && conv.agent_id !== 'aegis') {
-          agentNames.add(conv.agent_id);
-        }
-        // Also check title pattern
+      (data || []).forEach((conv: { title: string | null }) => {
+        // Extract agent name from title pattern "Chat with [AgentName]"
         if (conv.title) {
-          const match = conv.title.match(/^Chat with (.+)$/);
+          const match = conv.title.match(/^Chat with (.+)$/i);
           if (match && match[1]) {
-            agentNames.add(match[1]);
+            // Clean up the agent name (remove trailing punctuation like )**")
+            const agentName = match[1].replace(/[)\*]+$/, '').trim();
+            if (agentName && agentName.toLowerCase() !== 'aegis') {
+              agentNames.add(agentName);
+            }
           }
         }
       });
