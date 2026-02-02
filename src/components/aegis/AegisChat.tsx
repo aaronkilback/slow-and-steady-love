@@ -72,11 +72,11 @@ export function AegisChat() {
   const {
     status: realtimeStatus,
     isSupported,
+    isAgentSpeaking,
     connect: connectRealtime,
     disconnect: disconnectRealtime,
     error: realtimeError,
   } = useOpenAIRealtime({
-    agentContext: "You are in voice mode, assisting with security operations.",
     onTranscript: (text) => {
       setCurrentTranscript(text);
     },
@@ -91,27 +91,26 @@ export function AegisChat() {
     },
     onError: (error) => {
       console.error("[Voice] Error:", error);
-    },
-    onStatusChange: (status) => {
-      if (voiceTransportRef.current !== "realtime") return;
-      // Map realtime status to voice state
-      switch (status) {
-        case "idle":
-          setVoiceState("idle");
-          break;
-        case "connecting":
-          setVoiceState("processing");
-          break;
-        case "connected":
-        case "listening":
-          setVoiceState("listening");
-          break;
-        case "speaking":
-          setVoiceState("speaking");
-          break;
-      }
+      setVoiceOverlayMessage(error);
     },
   });
+
+  // Map realtime status + isAgentSpeaking to voice state for UI
+  useEffect(() => {
+    if (voiceTransportRef.current !== "realtime") return;
+    
+    if (realtimeStatus === "idle") {
+      setVoiceState("idle");
+    } else if (realtimeStatus === "connecting") {
+      setVoiceState("processing");
+    } else if (realtimeStatus === "connected") {
+      if (isAgentSpeaking) {
+        setVoiceState("speaking");
+      } else {
+        setVoiceState("listening");
+      }
+    }
+  }, [realtimeStatus, isAgentSpeaking]);
 
   const realtimeStatusRef = useRef(realtimeStatus);
   useEffect(() => {
