@@ -66,19 +66,26 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         break;
 
       case 'input_audio_buffer.speech_stopped':
-        console.log('User stopped speaking, waiting for transcription...');
+        console.log('User stopped speaking, requesting response immediately...');
         updateStatus('thinking');
         
-        // Fallback: if no response comes within 5 seconds, manually request one
+        // CRITICAL FIX: Immediately request a response when speech stops
+        // Server VAD with create_response:true isn't always reliable on iOS
+        if (dcRef.current?.readyState === 'open') {
+          console.log('[Voice] Sending immediate response.create after speech stopped');
+          dcRef.current.send(JSON.stringify({ type: 'response.create' }));
+        }
+        
+        // Also set a fallback in case the first one doesn't work
         if (responseFallbackRef.current) {
           window.clearTimeout(responseFallbackRef.current);
         }
         responseFallbackRef.current = window.setTimeout(() => {
           if (dcRef.current?.readyState === 'open') {
-            console.log('[Voice] Fallback: manually requesting response');
+            console.log('[Voice] Fallback: retrying response.create');
             dcRef.current.send(JSON.stringify({ type: 'response.create' }));
           }
-        }, 5000);
+        }, 3000);
         break;
 
       case 'input_audio_buffer.committed':
