@@ -15,6 +15,7 @@ serve(async (req) => {
     const messages = Array.isArray(body?.messages) ? body.messages : [];
     const operator = body?.operator ?? null;
     const conversationId = body?.conversationId ?? null;
+    const platformContext = body?.platformContext ?? null;
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -26,6 +27,10 @@ serve(async (req) => {
       : conversationId
         ? `\n\nConversation context:\n- conversation_id: ${conversationId}`
         : "";
+
+    const platformStatusLine = platformContext
+      ? `\n\nCURRENT PLATFORM STATUS:\n${platformContext}\n\nYou have full access to platform intelligence. Reference signals, team status, and locations when relevant to the operator's queries.`
+      : "";
 
     const systemPrompt = `You are Aegis, the lead AI security agent for Silent Shield Security Operations Center. You are:
 - Professional, tactical, and concise
@@ -46,8 +51,9 @@ Communication style:
 - Acknowledge the operator's requests clearly
 - Provide actionable intelligence and recommendations
 - Use markdown formatting for clarity (headers, bullets, bold for emphasis)
+- Reference current signals, team status, and locations when relevant
 
-Remember: You are the trusted AI partner for security professionals. Every interaction matters for mission success.${operatorLine}`;
+Remember: You are the trusted AI partner for security professionals. Every interaction matters for mission success.${operatorLine}${platformStatusLine}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",

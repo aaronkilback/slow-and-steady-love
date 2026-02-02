@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
+import { useFortressPlatformData, generatePlatformSummary } from "@/hooks/useFortressPlatformData";
 import { VoiceMode } from "./VoiceMode";
 
 const welcomeContent = `**Aegis Online** — Silent Shield Security Intelligence Platform
@@ -34,6 +35,9 @@ export function AegisChat() {
     deleteConversation,
   } = useAegisChat();
 
+  // Fetch platform data for full Aegis awareness
+  const { signals, locations, profiles } = useFortressPlatformData();
+
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState("");
@@ -42,22 +46,26 @@ export function AegisChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Build context for voice mode including operator info and recent messages
+  // Build context for voice mode including operator info, platform data, and recent messages
   const voiceContext = useMemo(() => {
     const recentMessages = messages.slice(-10).map(m => `${m.role}: ${m.content}`).join('\n');
+    const platformSummary = generatePlatformSummary({ signals, locations, profiles });
     const operatorInfo = currentConversationId 
       ? `Current conversation ID: ${currentConversationId}.` 
       : '';
     
     return `You are AEGIS, the lead AI security agent for the Silent Shield platform. Assist the operator with security briefings, threat analysis, and system monitoring.
 
+CURRENT PLATFORM STATUS:
+${platformSummary}
+
 ${operatorInfo}
 
 Recent conversation context:
 ${recentMessages || '(No prior messages in this session)'}
 
-Continue the conversation naturally, referencing prior context when relevant.`;
-  }, [messages, currentConversationId]);
+You have full access to platform intelligence. Reference signals, team status, and locations when relevant. Continue conversations naturally.`;
+  }, [messages, currentConversationId, signals, locations, profiles]);
 
   // OpenAI Realtime API for voice
   const {
@@ -92,13 +100,19 @@ Continue the conversation naturally, referencing prior context when relevant.`;
     : realtimeStatus === "speaking" ? "speaking"
     : "listening";
 
+  // Generate platform summary for text chat
+  const platformSummary = useMemo(() => 
+    generatePlatformSummary({ signals, locations, profiles }),
+    [signals, locations, profiles]
+  );
+
   // Handle sending message (for text input)
   const handleSend = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
     const message = input;
     setInput("");
-    await sendMessage(message);
-  }, [input, isStreaming, sendMessage]);
+    await sendMessage(message, platformSummary);
+  }, [input, isStreaming, sendMessage, platformSummary]);
 
   // Handle opening voice mode - CRITICAL: connect() called directly from click handler
   const handleOpenVoiceMode = useCallback(() => {

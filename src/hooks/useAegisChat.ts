@@ -243,7 +243,7 @@ export function useAegisChat() {
     loadConversations();
   };
 
-  const sendMessage = useCallback(async (input: string): Promise<string | null> => {
+  const sendMessage = useCallback(async (input: string, platformContext?: string): Promise<string | null> => {
     if (!input.trim() || isStreaming) return null;
 
     let finalAssistantContent: string | null = null;
@@ -316,6 +316,7 @@ export function useAegisChat() {
         body: JSON.stringify({
           messages: apiMessages,
           conversationId: convId,
+          platformContext: platformContext || null,
           operator: operator
             ? { id: operator.id, name: operator.name ?? null }
             : userId
