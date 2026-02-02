@@ -43,8 +43,31 @@ export function AegisChat() {
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<{ id: string; name: string; role?: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check for selected agent from agent directory
+  useEffect(() => {
+    const storedAgent = sessionStorage.getItem("selectedAgent");
+    if (storedAgent) {
+      try {
+        const agent = JSON.parse(storedAgent);
+        setSelectedAgent(agent);
+        sessionStorage.removeItem("selectedAgent");
+        
+        // Auto-send greeting to the selected agent
+        if (agent.id !== "aegis" && agent.name) {
+          const greeting = `Connect me to ${agent.name}. I need to speak with this agent.`;
+          setInput(greeting);
+          // Focus input so user can modify or send
+          setTimeout(() => inputRef.current?.focus(), 100);
+        }
+      } catch {
+        sessionStorage.removeItem("selectedAgent");
+      }
+    }
+  }, []);
 
   // Build context for voice mode including operator info, platform data, and recent messages
   const voiceContext = useMemo(() => {
