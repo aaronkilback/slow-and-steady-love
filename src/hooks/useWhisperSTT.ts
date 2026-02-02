@@ -12,6 +12,21 @@ export function useWhisperSTT(options: UseWhisperSTTOptions = {}) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const mimeTypeRef = useRef<string>("");
+  const fileExtRef = useRef<"webm" | "mp4">("webm");
+
+  const pickBestMimeType = useCallback(() => {
+    // iOS Safari often does NOT support audio/webm for MediaRecorder.
+    // Prefer opus/webm when available, otherwise fall back to audio/mp4.
+    const preferred = [
+      "audio/webm;codecs=opus",
+      "audio/mp4",
+      "audio/webm",
+    ];
+    const chosen = preferred.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+    const ext: "webm" | "mp4" = chosen.includes("mp4") ? "mp4" : "webm";
+    return { mimeType: chosen, ext };
+  }, []);
 
   const startListening = useCallback(async () => {
     try {
@@ -26,11 +41,13 @@ export function useWhisperSTT(options: UseWhisperSTTOptions = {}) {
       streamRef.current = stream;
 
       // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-          ? 'audio/webm;codecs=opus' 
-          : 'audio/webm'
-      });
+      const { mimeType, ext } = pickBestMimeType();
+      mimeTypeRef.current = mimeType;
+      fileExtRef.current = ext;
+
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -40,7 +57,7 @@ export function useWhisperSTT(options: UseWhisperSTTOptions = {}) {
         }
       };
 
-      mediaRecorder.start(100); // Collect data every 100ms
+      mediaRecorder.start(250); // Collect data every 250ms (more stable on mobile)
       setIsListening(true);
       options.onListeningChange?.(true);
       
@@ -73,7 +90,9 @@ export function useWhisperSTT(options: UseWhisperSTTOptions = {}) {
         }
 
         // Create audio blob
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const chosenMime = mimeTypeRef.current || mediaRecorder.mimeType || "";
+        const ext = fileExtRef.current;
+        const audioBlob = new Blob(chunksRef.current, { type: chosenMime || (ext === "mp4" ? "audio/mp4" : "audio/webm") });
         chunksRef.current = [];
 
         if (audioBlob.size < 1000) {
@@ -88,7 +107,7 @@ export function useWhisperSTT(options: UseWhisperSTTOptions = {}) {
         try {
           // Send to our edge function
           const formData = new FormData();
-          formData.append("audio", audioBlob, "audio.webm");
+          formData.append("audio", audioBlob, `audio.${ext}`);
 
           const response = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-stt`,
