@@ -16,14 +16,45 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
   const dcRef = useRef<RTCDataChannel | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const optionsRef = useRef(options);
   
   useEffect(() => { 
     optionsRef.current = options; 
   }, [options]);
 
+  // Request Wake Lock to prevent screen from sleeping during voice session
+  const requestWakeLock = useCallback(async () => {
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        console.log('[Realtime] Wake Lock acquired - screen will stay on');
+        
+        // Re-acquire wake lock if released (e.g., tab switch)
+        wakeLockRef.current.addEventListener('release', () => {
+          console.log('[Realtime] Wake Lock released');
+        });
+      } catch (err) {
+        console.warn('[Realtime] Wake Lock not available:', err);
+      }
+    } else {
+      console.log('[Realtime] Wake Lock API not supported');
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(() => {
+    if (wakeLockRef.current) {
+      wakeLockRef.current.release().catch(() => {});
+      wakeLockRef.current = null;
+      console.log('[Realtime] Wake Lock released');
+    }
+  }, []);
+
   const disconnect = useCallback(() => {
     console.log('[Realtime] Disconnecting...');
+    
+    // Release wake lock
+    releaseWakeLock();
     
     if (dcRef.current) {
       dcRef.current.close();
@@ -49,7 +80,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
     
     setIsAgentSpeaking(false);
     setStatus('idle');
-  }, []);
+  }, [releaseWakeLock]);
 
   /**
    * CRITICAL: This function MUST be called directly from a button onClick handler.
@@ -66,6 +97,9 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('[Realtime] Starting connection...');
       setStatus('connecting');
 
+      // Request Wake Lock to keep screen awake during voice session (iOS + Android)
+      await requestWakeLock();
+
       // CRITICAL (iOS PWA): Initiate microphone capture immediately from the click stack.
       // Do this BEFORE any network awaits to avoid losing the user-gesture requirement.
       console.log('[Realtime] Requesting microphone...');
@@ -75,6 +109,7 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
+          autoGainControl: true, // Helps with iOS audio levels
         },
       });
       mediaStreamRef.current = stream;
@@ -215,7 +250,22 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       setStatus('idle');
       disconnect();
     }
-  }, [disconnect, status]);
+  }, [disconnect, status, requestWakeLock]);
+
+  // Re-acquire wake lock when page becomes visible again (tab switch, screen wake)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && 
+          (status === 'connected' || status === 'speaking') && 
+          !wakeLockRef.current) {
+        console.log('[Realtime] Re-acquiring wake lock after visibility change');
+        await requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [status, requestWakeLock]);
 
   // Cleanup on unmount
   useEffect(() => () => disconnect(), [disconnect]);
