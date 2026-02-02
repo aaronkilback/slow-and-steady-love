@@ -146,31 +146,20 @@ export function AegisChat() {
 
   const switchToPushToTalk = useCallback(() => {
     setVoiceTransport("push_to_talk");
-    setVoiceOverlayMessage(
-      "Realtime voice is unavailable on this iOS network. Push-to-talk enabled."
-    );
+    setVoiceOverlayMessage(null);
     disconnectRealtime();
     setVoiceState("idle");
   }, [disconnectRealtime]);
 
-  // iOS PWA (Home Screen app) has restricted WebRTC. If realtime never connects,
-  // automatically fall back to push-to-talk. Safari browser should work fine.
+  // Handle realtime connection errors - offer PTT as fallback
   useEffect(() => {
     if (!voiceModeOpen) return;
     if (voiceTransport !== "realtime") return;
-    // Only auto-fallback in PWA standalone mode, not regular Safari browser
-    if (!isPWAStandalone()) return;
+    if (!realtimeError) return;
 
-    const t = window.setTimeout(() => {
-      const s = realtimeStatusRef.current;
-      if (s === "idle" || s === "connecting") {
-        // Only auto-fallback if we have no explicit realtime error.
-        if (!realtimeError) switchToPushToTalk();
-      }
-    }, 7000);
-
-    return () => window.clearTimeout(t);
-  }, [voiceModeOpen, voiceTransport, realtimeError, switchToPushToTalk]);
+    // Show error but don't auto-switch - let user decide
+    setVoiceOverlayMessage(realtimeError);
+  }, [voiceModeOpen, voiceTransport, realtimeError]);
 
   // Drive overlay state from push-to-talk activity
   useEffect(() => {
