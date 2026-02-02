@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.realtime-telemetry]
 verify_jwt = false
+
+[functions.voice-tool-executor]
+verify_jwt = false

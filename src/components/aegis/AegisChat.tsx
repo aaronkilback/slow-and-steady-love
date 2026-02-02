@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
-import { useOpenAIRealtime } from "@/hooks/useOpenAIRealtime";
+import { useOpenAIRealtime } from "@/components/voice/useOpenAIRealtime";
 import { useFortressPlatformData, generatePlatformSummary } from "@/hooks/useFortressPlatformData";
 import { VoiceMode } from "./VoiceMode";
 
@@ -94,13 +94,17 @@ You have full access to platform intelligence. Reference signals, team status, a
   const {
     status: realtimeStatus,
     isSupported,
-    isAgentSpeaking,
-    isConnected,
+    transcript,
+    agentResponse: realtimeAgentResponse,
     connect: connectRealtime,
     disconnect: disconnectRealtime,
+    stopSpeaking,
   } = useOpenAIRealtime({
     onTranscript: (text) => {
       setCurrentTranscript(text);
+    },
+    onAgentResponse: (text) => {
+      setAegisResponse(prev => prev + text);
     },
     onAgentResponseComplete: (text) => {
       setAegisResponse(text);
@@ -379,11 +383,11 @@ You have full access to platform intelligence. Reference signals, team status, a
         isSupported={isSupported}
         errorMessage={voiceError}
         interimTranscript=""
-        currentTranscript={currentTranscript}
-        aegisResponse={aegisResponse}
+        currentTranscript={currentTranscript || transcript}
+        aegisResponse={aegisResponse || realtimeAgentResponse}
         onClose={handleCloseVoiceMode}
         onToggleListening={disconnectRealtime}
-        onStopSpeaking={disconnectRealtime}
+        onStopSpeaking={stopSpeaking}
       />
     </div>
   );
