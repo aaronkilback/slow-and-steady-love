@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,23 @@ export function AegisChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Build context for voice mode including operator info and recent messages
+  const voiceContext = useMemo(() => {
+    const recentMessages = messages.slice(-10).map(m => `${m.role}: ${m.content}`).join('\n');
+    const operatorInfo = currentConversationId 
+      ? `Current conversation ID: ${currentConversationId}.` 
+      : '';
+    
+    return `You are AEGIS, the lead AI security agent for the Silent Shield platform. Assist the operator with security briefings, threat analysis, and system monitoring.
+
+${operatorInfo}
+
+Recent conversation context:
+${recentMessages || '(No prior messages in this session)'}
+
+Continue the conversation naturally, referencing prior context when relevant.`;
+  }, [messages, currentConversationId]);
+
   // OpenAI Realtime API for voice
   const {
     status: realtimeStatus,
@@ -66,7 +83,7 @@ export function AegisChat() {
       console.error("[Voice] Error:", error);
       setVoiceError(error);
     },
-    agentContext: "You are AEGIS, the lead AI security agent for the Silent Shield platform. Assist the operator with security briefings, threat analysis, and system monitoring.",
+    agentContext: voiceContext,
   });
 
   // Map realtime status to voice state for UI
