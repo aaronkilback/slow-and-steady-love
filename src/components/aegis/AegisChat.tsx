@@ -153,12 +153,13 @@ export function AegisChat() {
     setVoiceState("idle");
   }, [disconnectRealtime]);
 
-  // iOS Safari frequently stalls WebRTC on certain networks. If realtime never gets off the ground,
-  // automatically fall back to push-to-talk so voice still works.
+  // iOS PWA (Home Screen app) has restricted WebRTC. If realtime never connects,
+  // automatically fall back to push-to-talk. Safari browser should work fine.
   useEffect(() => {
     if (!voiceModeOpen) return;
     if (voiceTransport !== "realtime") return;
-    if (!isIOSDevice()) return;
+    // Only auto-fallback in PWA standalone mode, not regular Safari browser
+    if (!isPWAStandalone()) return;
 
     const t = window.setTimeout(() => {
       const s = realtimeStatusRef.current;
