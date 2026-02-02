@@ -22,35 +22,15 @@ serve(async (req) => {
       );
     }
 
-    let agentContext = "";
-    let offerSdp = "";
+    let instructions = "You are a helpful assistant.";
     try {
       const body = await req.json();
-      agentContext = body.agentContext || "";
-      offerSdp = body.offer_sdp || "";
+      if (body.instructions) {
+        instructions = body.instructions;
+      }
     } catch {
       // No body or invalid JSON, use defaults
     }
-
-    const instructions = `You are Aegis, lead AI security agent for Silent Shield Security Intelligence Platform.
-
-VOICE STYLE:
-- Deep, authoritative male voice with commanding presence
-- Measured, deliberate pacing—never rushed
-- Clinical precision with strategic undertones
-- Speaks like a senior intelligence officer delivering a classified briefing
-- Zero filler words—every phrase carries weight
-- Calm confidence, not aggressive
-- Keep answers tight: 1-3 sentences by default unless detail is requested
-- Never sound robotic
-
-ROLE:
-- Lead AI Security Agent for the Fortress platform
-- Coordinates specialized agents for security tasks
-- Provides threat analysis and intelligence briefings
-- Monitors system status and coordinates command operations
-
-${agentContext ? `Current context: ${agentContext}` : ""}`;
 
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
@@ -61,19 +41,15 @@ ${agentContext ? `Current context: ${agentContext}` : ""}`;
       body: JSON.stringify({
         model: "gpt-4o-realtime-preview-2024-12-17",
         modalities: ["audio", "text"],
-        voice: "ash", // Deep, authoritative male voice (closest to onyx)
+        voice: "onyx",
         input_audio_format: "pcm16",
         output_audio_format: "pcm16",
         instructions,
-        tools: [],
-        tool_choice: "auto",
-        input_audio_transcription: { model: "whisper-1" },
         turn_detection: {
           type: "server_vad",
           threshold: 0.5,
           prefix_padding_ms: 300,
           silence_duration_ms: 800,
-          create_response: true,
         },
       }),
     });
@@ -88,41 +64,7 @@ ${agentContext ? `Current context: ${agentContext}` : ""}`;
     }
 
     const data = await response.json();
-
-    // If we got an SDP offer from the client, complete the handshake server-side.
-    // This avoids client-side CORS / network restrictions that can cause "Starting..." stalls in production.
-    if (offerSdp && typeof offerSdp === "string") {
-      const sdpResponse = await fetch(
-        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${data.client_secret?.value}`,
-            "Content-Type": "application/sdp",
-          },
-          body: offerSdp,
-        }
-      );
-
-      if (!sdpResponse.ok) {
-        const errorText = await sdpResponse.text();
-        console.error("OpenAI Realtime SDP error:", sdpResponse.status, errorText);
-        return new Response(
-          JSON.stringify({ error: `OpenAI Realtime SDP error: ${sdpResponse.status}` }),
-          { status: sdpResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const answer_sdp = await sdpResponse.text();
-      return new Response(
-        JSON.stringify({
-          session_id: data.id,
-          answer_sdp,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
+    
     return new Response(
       JSON.stringify({
         client_secret: data.client_secret,
