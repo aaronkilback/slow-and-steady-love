@@ -126,9 +126,23 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       
       console.log('[Realtime] Got session token');
 
-      // Step 2: Create RTCPeerConnection
-      const pc = new RTCPeerConnection();
+      // Step 2: Create RTCPeerConnection with STUN servers for better connectivity
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      });
       pcRef.current = pc;
+
+      // Monitor ICE connection state
+      pc.oniceconnectionstatechange = () => {
+        console.log('[Realtime] ICE state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          console.error('[Realtime] ICE connection failed');
+          optionsRef.current.onError?.('Connection lost. Please try again.');
+        }
+      };
 
       // Step 3: Create audio element for playback (iOS PWA compatible)
       const audioEl = document.createElement('audio');
@@ -151,7 +165,18 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       };
 
       // Step 5: Add microphone tracks to peer connection
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+      // Verify audio track is active before adding
+      const audioTracks = stream.getAudioTracks();
+      console.log('[Realtime] Audio tracks:', audioTracks.length, 'enabled:', audioTracks[0]?.enabled);
+      
+      if (audioTracks.length === 0 || !audioTracks[0].enabled) {
+        throw new Error('Microphone not available - please check permissions');
+      }
+      
+      audioTracks.forEach(track => {
+        console.log('[Realtime] Adding audio track:', track.label, 'muted:', track.muted);
+        pc.addTrack(track, stream);
+      });
 
       // Step 6: Create data channel for events
       const dc = pc.createDataChannel('oai-events');
