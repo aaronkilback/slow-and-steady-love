@@ -31,9 +31,8 @@ function isIOSDevice() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent);
 }
 
-function isStandaloneDisplayMode() {
+function isPWAStandalone() {
   if (typeof window === "undefined") return false;
-  // iOS Safari (Home Screen) exposes navigator.standalone; modern PWAs expose display-mode.
   const navStandalone = Boolean((navigator as unknown as { standalone?: boolean }).standalone);
   const mediaStandalone =
     typeof window.matchMedia === "function" &&
@@ -212,25 +211,20 @@ export function AegisChat() {
   }, [disconnectRealtime, stopTTS, whisper]);
 
   // Handle opening voice mode - connect to realtime API
+  // CRITICAL: connectRealtime() MUST be called synchronously from this click handler
+  // for iOS PWA to properly authorize microphone access.
   const handleOpenVoiceMode = useCallback(() => {
     setVoiceModeOpen(true);
     setCurrentTranscript("");
     setAegisResponse("");
     setVoiceOverlayMessage(null);
-    // iOS Home Screen web apps are prone to WebRTC audio session failures ("object is invalid state").
-    // In that mode, force the reliable Push-to-Talk pipeline.
-    if (isIOSDevice() && isStandaloneDisplayMode()) {
-      setVoiceTransport("push_to_talk");
-      setVoiceState("idle");
-      setVoiceOverlayMessage(
-        "Realtime voice is unstable in iOS Home Screen mode. Push-to-talk enabled."
-      );
-      return;
-    }
 
+    // Always attempt realtime first - the hook now handles iOS-specific
+    // AudioContext resume and optimized audio constraints
     setVoiceTransport("realtime");
     setVoiceState("processing");
-    // Connect to OpenAI Realtime API
+    
+    // Connect synchronously from user gesture (critical for iOS PWA)
     connectRealtime();
   }, [connectRealtime]);
 
