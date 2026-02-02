@@ -36,7 +36,7 @@ export function AegisChat() {
   } = useAegisChat();
 
   // Fetch platform data for full Aegis awareness
-  const { signals, locations, profiles } = useFortressPlatformData();
+  const { signals, locations, profiles, agents } = useFortressPlatformData();
 
   const [input, setInput] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
@@ -49,7 +49,7 @@ export function AegisChat() {
   // Build context for voice mode including operator info, platform data, and recent messages
   const voiceContext = useMemo(() => {
     const recentMessages = messages.slice(-10).map(m => `${m.role}: ${m.content}`).join('\n');
-    const platformSummary = generatePlatformSummary({ signals, locations, profiles });
+    const platformSummary = generatePlatformSummary({ signals, locations, profiles, agents });
     const operatorInfo = currentConversationId 
       ? `Current conversation ID: ${currentConversationId}.` 
       : '';
@@ -64,8 +64,8 @@ ${operatorInfo}
 Recent conversation context:
 ${recentMessages || '(No prior messages in this session)'}
 
-You have full access to platform intelligence. Reference signals, team status, and locations when relevant. Continue conversations naturally.`;
-  }, [messages, currentConversationId, signals, locations, profiles]);
+You have full access to platform intelligence. Reference signals, team status, available agents, and locations when relevant. Continue conversations naturally.`;
+  }, [messages, currentConversationId, signals, locations, profiles, agents]);
 
   // OpenAI Realtime API for voice
   const {
@@ -102,8 +102,8 @@ You have full access to platform intelligence. Reference signals, team status, a
 
   // Generate platform summary for text chat
   const platformSummary = useMemo(() => 
-    generatePlatformSummary({ signals, locations, profiles }),
-    [signals, locations, profiles]
+    generatePlatformSummary({ signals, locations, profiles, agents }),
+    [signals, locations, profiles, agents]
   );
 
   // Handle sending message (for text input)
