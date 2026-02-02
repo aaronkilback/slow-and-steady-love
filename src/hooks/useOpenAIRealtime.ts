@@ -263,17 +263,45 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       dc.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data);
+
+          // Useful for debugging “stuck on listening” cases (iOS often succeeds in WebRTC but never triggers a response)
+          if (d?.type) {
+            console.log('[Realtime] Event:', d.type);
+          }
           
           // User speech transcription
           if (d.type === 'conversation.item.input_audio_transcription.completed') {
             console.log('[Realtime] User said:', d.transcript);
             optionsRef.current.onTranscript?.(d.transcript);
+
+            // IMPORTANT: Explicitly request a response on each completed transcription.
+            // Relying on server_vad.create_response alone can fail/stall on some iOS/WebRTC paths.
+            try {
+              dcRef.current?.send(
+                JSON.stringify({
+                  type: 'response.create',
+                  response: {
+                    modalities: ['audio', 'text'],
+                  },
+                })
+              );
+            } catch (err) {
+              console.warn('[Realtime] Failed to request response:', err);
+            }
           }
           
           // Agent response complete
           if (d.type === 'response.audio_transcript.done') {
             console.log('[Realtime] Agent said:', d.transcript);
             optionsRef.current.onAgentResponseComplete?.(d.transcript || '');
+          }
+
+          // Some versions emit text completion events under different names
+          if (d.type === 'response.output_text.done' || d.type === 'response.text.done') {
+            if (typeof d.text === 'string' && d.text.trim()) {
+              console.log('[Realtime] Agent text:', d.text);
+              optionsRef.current.onAgentResponseComplete?.(d.text.trim());
+            }
           }
           
           // Agent is speaking
