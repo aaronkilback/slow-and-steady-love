@@ -229,7 +229,13 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
       console.log('Got ephemeral token, session:', tokenData.session_id);
       const ephemeralKey = tokenData.client_secret.value;
 
-      const pc = new RTCPeerConnection();
+      // IMPORTANT: Add ICE servers for better NAT traversal on iOS
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ]
+      });
       pcRef.current = pc;
 
       pc.oniceconnectionstatechange = () => {
@@ -248,23 +254,39 @@ export function useOpenAIRealtime(options: UseOpenAIRealtimeOptions = {}) {
         }
       };
 
+      // CRITICAL for iOS PWA: Create audio element with all iOS-required attributes
       const audioEl = document.createElement('audio');
       audioEl.autoplay = true;
       (audioEl as any).playsInline = true;
       audioEl.setAttribute('playsinline', 'true');
+      audioEl.setAttribute('webkit-playsinline', 'true');
       audioEl.muted = false;
       audioEl.volume = 1;
-      audioElementRef.current = audioEl;
+      // iOS sometimes needs the audio element to be in the DOM before assigning srcObject
       document.body.appendChild(audioEl);
+      audioElementRef.current = audioEl;
 
       pc.ontrack = (event) => {
-        console.log('Received audio track from OpenAI');
-        audioEl.srcObject = event.streams[0];
-        audioEl.play().catch((err) => {
-          console.warn('Audio autoplay blocked:', err);
-          optionsRef.current.onError?.('Audio playback blocked. Tap to enable sound.');
-          window.addEventListener('pointerdown', () => audioEl.play().catch(() => {}), { once: true });
-        });
+        console.log('Received audio track from OpenAI, tracks:', event.streams[0]?.getAudioTracks().length);
+        if (event.streams[0]) {
+          audioEl.srcObject = event.streams[0];
+          // iOS requires explicit play() call from user gesture context
+          const playPromise = audioEl.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((err) => {
+              console.warn('Audio autoplay blocked:', err);
+              optionsRef.current.onError?.('Tap screen to enable audio');
+              // Fallback: wait for any user interaction
+              const resumeAudio = () => {
+                audioEl.play().catch(() => {});
+                document.removeEventListener('touchstart', resumeAudio);
+                document.removeEventListener('click', resumeAudio);
+              };
+              document.addEventListener('touchstart', resumeAudio, { once: true, passive: true });
+              document.addEventListener('click', resumeAudio, { once: true });
+            });
+          }
+        }
       };
 
       console.log('Requesting microphone access...');
