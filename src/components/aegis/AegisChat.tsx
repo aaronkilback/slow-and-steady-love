@@ -96,8 +96,6 @@ You have full access to platform intelligence. Reference signals, team status, a
     isSupported,
     isAgentSpeaking,
     isConnected,
-    micLevel,
-    lastEventType,
     connect: connectRealtime,
     disconnect: disconnectRealtime,
   } = useOpenAIRealtime({
@@ -386,8 +384,6 @@ You have full access to platform intelligence. Reference signals, team status, a
         interimTranscript=""
         currentTranscript={currentTranscript}
         aegisResponse={aegisResponse}
-        micLevel={micLevel}
-        lastEventType={lastEventType}
         onClose={handleCloseVoiceMode}
         onToggleListening={disconnectRealtime}
         onStopSpeaking={disconnectRealtime}
