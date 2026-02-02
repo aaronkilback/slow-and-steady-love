@@ -3,7 +3,7 @@ import { Mic, X, Shield, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type VoiceState = "idle" | "listening" | "processing" | "speaking";
+type VoiceState = "idle" | "connecting" | "connected" | "speaking" | "listening" | "thinking";
 
 interface VoiceModeProps {
   isOpen: boolean;
@@ -30,8 +30,9 @@ export function VoiceMode({
   onStopSpeaking,
 }: VoiceModeProps) {
   const isListening = voiceState === "listening";
-  const isProcessing = voiceState === "processing";
+  const isProcessing = voiceState === "connecting" || voiceState === "thinking";
   const isSpeaking = voiceState === "speaking";
+  const isConnected = voiceState === "connected";
 
   const getStatusText = () => {
     if (!isSupported) return "Voice not supported in this browser";
@@ -40,10 +41,14 @@ export function VoiceMode({
     switch (voiceState) {
       case "listening":
         return "Listening...";
-      case "processing":
+      case "connecting":
         return "Connecting...";
+      case "thinking":
+        return "Processing...";
       case "speaking":
         return "Aegis is speaking...";
+      case "connected":
+        return "Ready — speak anytime";
       default:
         return "Starting...";
     }
