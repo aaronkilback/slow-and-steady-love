@@ -23,9 +23,3 @@ verify_jwt = false
 
 [functions.flight-lookup]
 verify_jwt = false
-
-[functions.generate-travel-briefing]
-verify_jwt = false
-
-[functions.parse-travel-report]
-verify_jwt = false
