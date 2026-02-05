@@ -205,9 +205,9 @@ export function useFortressPlatformData(): FortressPlatformData {
 }
 
 /**
- * Categorizes signals for travel risk analysis
+ * Signal categories for comprehensive threat scanning
  */
-function categorizeSignalsForTravel(signals: Signal[]): {
+export interface CategorizedSignals {
   weather: Signal[];
   disasters: Signal[];
   geopolitical: Signal[];
@@ -215,27 +215,49 @@ function categorizeSignalsForTravel(signals: Signal[]): {
   health: Signal[];
   infrastructure: Signal[];
   travel: Signal[];
+  aviation: Signal[];
+  cyber: Signal[];
+  economic: Signal[];
+  environmental: Signal[];
+  legal: Signal[];
   other: Signal[];
-} {
-  const categories = {
-    weather: [] as Signal[],
-    disasters: [] as Signal[],
-    geopolitical: [] as Signal[],
-    security: [] as Signal[],
-    health: [] as Signal[],
-    infrastructure: [] as Signal[],
-    travel: [] as Signal[],
-    other: [] as Signal[],
+}
+
+/**
+ * Categorizes signals for comprehensive risk analysis
+ * Includes all threat vectors: weather, disasters, geopolitical, security, health,
+ * infrastructure, travel, aviation, cyber, economic, environmental, and legal
+ */
+function categorizeSignalsForTravel(signals: Signal[]): CategorizedSignals {
+  const categories: CategorizedSignals = {
+    weather: [],
+    disasters: [],
+    geopolitical: [],
+    security: [],
+    health: [],
+    infrastructure: [],
+    travel: [],
+    aviation: [],
+    cyber: [],
+    economic: [],
+    environmental: [],
+    legal: [],
+    other: [],
   };
 
-  const categoryPatterns = {
-    weather: /weather|storm|hurricane|typhoon|tornado|flood|rain|snow|heat|cold|temperature|climate|wind|lightning|forecast/i,
-    disasters: /earthquake|tsunami|volcano|wildfire|fire|landslide|avalanche|disaster|emergency|evacuation|natural/i,
-    geopolitical: /conflict|war|military|protest|civil|unrest|political|government|coup|sanction|border|embargo|diplomatic|terrorism|attack/i,
-    security: /crime|theft|robbery|assault|kidnap|hostage|threat|violence|gang|cartel|piracy|security|danger|warning/i,
-    health: /health|disease|outbreak|epidemic|pandemic|virus|covid|flu|medical|hospital|quarantine|vaccination|illness/i,
-    infrastructure: /power|electricity|blackout|outage|transport|airport|road|highway|bridge|internet|communication|fuel|shortage/i,
-    travel: /travel|flight|airline|visa|entry|exit|restriction|advisory|tourism|hotel|accommodation/i,
+  const categoryPatterns: Record<keyof Omit<CategorizedSignals, 'other'>, RegExp> = {
+    weather: /weather|storm|hurricane|typhoon|tornado|flood|rain|snow|heat|cold|temperature|climate|wind|lightning|forecast|monsoon|blizzard|drought|heatwave|fog|visibility/i,
+    disasters: /earthquake|tsunami|volcano|wildfire|fire|landslide|avalanche|disaster|emergency|evacuation|natural|seismic|eruption|mudslide|sinkhole/i,
+    geopolitical: /conflict|war|military|protest|civil|unrest|political|government|coup|sanction|border|embargo|diplomatic|terrorism|attack|insurgent|rebel|militia|riot|demonstration|revolution|martial law/i,
+    security: /crime|theft|robbery|assault|kidnap|hostage|threat|violence|gang|cartel|piracy|security|danger|warning|homicide|murder|armed|shooting|bombing|explosive|scam|fraud/i,
+    health: /health|disease|outbreak|epidemic|pandemic|virus|covid|flu|medical|hospital|quarantine|vaccination|illness|malaria|dengue|cholera|ebola|zika|contamination|food.?borne|water.?borne/i,
+    infrastructure: /power|electricity|blackout|outage|transport|road|highway|bridge|internet|communication|fuel|shortage|water.?supply|gas|railway|metro|subway|port|harbor|dock/i,
+    travel: /travel|visa|entry|exit|restriction|advisory|tourism|hotel|accommodation|border.?crossing|customs|immigration|passport|documentation/i,
+    aviation: /flight|airline|airport|aviation|plane|aircraft|airspace|runway|terminal|gate|delay|cancel|divert|ground.?stop|notam|faa|easa|turbulence|air.?traffic/i,
+    cyber: /cyber|hack|breach|malware|ransomware|phishing|ddos|data.?leak|network|firewall|vpn|encryption|digital|online.?fraud|identity.?theft|scam/i,
+    economic: /economic|currency|exchange.?rate|inflation|recession|market|trade|tariff|price|cost|shortage|supply.?chain|banking|atm|payment|strike|labor/i,
+    environmental: /pollution|air.?quality|water.?quality|radiation|nuclear|chemical|spill|contamination|toxic|hazardous|waste|smog|wildfire.?smoke/i,
+    legal: /law|legal|arrest|detention|regulation|compliance|permit|license|prohibition|ban|curfew|martial.?law|state.?of.?emergency|deportation/i,
   };
 
   signals.forEach((signal) => {
@@ -244,7 +266,7 @@ function categorizeSignalsForTravel(signals: Signal[]): {
 
     for (const [category, pattern] of Object.entries(categoryPatterns)) {
       if (pattern.test(text)) {
-        categories[category as keyof typeof categories].push(signal);
+        categories[category as keyof CategorizedSignals].push(signal);
         matched = true;
         break;
       }
@@ -257,6 +279,11 @@ function categorizeSignalsForTravel(signals: Signal[]): {
 
   return categories;
 }
+
+/**
+ * Exports categorized signals for external use
+ */
+export { categorizeSignalsForTravel };
 
 /**
  * Generates a comprehensive summary of platform data for AI context,
@@ -349,12 +376,67 @@ export function generatePlatformSummary(data: {
 
   // Travel Advisories
   if (categorized.travel.length > 0) {
-    lines.push("✈️ TRAVEL ADVISORIES:");
+    lines.push("🛂 TRAVEL ADVISORIES:");
     categorized.travel.slice(0, 5).forEach((s) => {
       const priority = s.priority || s.severity || "info";
       lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
     });
     if (categorized.travel.length > 5) lines.push(`  ... and ${categorized.travel.length - 5} more travel advisories`);
+    lines.push("");
+  }
+
+  // Aviation & Flight Status
+  if (categorized.aviation.length > 0) {
+    lines.push("✈️ AVIATION & FLIGHTS:");
+    categorized.aviation.slice(0, 5).forEach((s) => {
+      const priority = s.priority || s.severity || "info";
+      lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
+    });
+    if (categorized.aviation.length > 5) lines.push(`  ... and ${categorized.aviation.length - 5} more aviation alerts`);
+    lines.push("");
+  }
+
+  // Cyber Threats
+  if (categorized.cyber.length > 0) {
+    lines.push("💻 CYBER THREATS:");
+    categorized.cyber.slice(0, 5).forEach((s) => {
+      const priority = s.priority || s.severity || "info";
+      lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
+    });
+    if (categorized.cyber.length > 5) lines.push(`  ... and ${categorized.cyber.length - 5} more cyber alerts`);
+    lines.push("");
+  }
+
+  // Economic & Financial
+  if (categorized.economic.length > 0) {
+    lines.push("💰 ECONOMIC & FINANCIAL:");
+    categorized.economic.slice(0, 5).forEach((s) => {
+      const priority = s.priority || s.severity || "info";
+      lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
+    });
+    if (categorized.economic.length > 5) lines.push(`  ... and ${categorized.economic.length - 5} more economic alerts`);
+    lines.push("");
+  }
+
+  // Environmental Hazards
+  if (categorized.environmental.length > 0) {
+    lines.push("☢️ ENVIRONMENTAL HAZARDS:");
+    categorized.environmental.slice(0, 5).forEach((s) => {
+      const priority = s.priority || s.severity || "info";
+      lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
+    });
+    if (categorized.environmental.length > 5) lines.push(`  ... and ${categorized.environmental.length - 5} more environmental alerts`);
+    lines.push("");
+  }
+
+  // Legal & Regulatory
+  if (categorized.legal.length > 0) {
+    lines.push("⚖️ LEGAL & REGULATORY:");
+    categorized.legal.slice(0, 5).forEach((s) => {
+      const priority = s.priority || s.severity || "info";
+      lines.push(`  - [${priority.toUpperCase()}] ${s.title}${s.description ? `: ${s.description.slice(0, 100)}` : ""}`);
+    });
+    if (categorized.legal.length > 5) lines.push(`  ... and ${categorized.legal.length - 5} more legal alerts`);
     lines.push("");
   }
 
@@ -401,17 +483,25 @@ export function generatePlatformSummary(data: {
     return "Platform data unavailable. Operating with limited intelligence.";
   }
 
-  // Travel risk guidance
-  lines.push("=== TRAVEL RISK ANALYSIS GUIDANCE ===");
-  lines.push("When assessing travel risks, consider:");
-  lines.push("• Weather conditions at origin, destination, and transit points");
-  lines.push("• Active natural disasters and evacuation zones");
-  lines.push("• Geopolitical stability and civil unrest");
-  lines.push("• Local security threats and crime rates");
-  lines.push("• Health advisories, disease outbreaks, and medical infrastructure");
-  lines.push("• Transportation disruptions and infrastructure status");
-  lines.push("• Entry/exit requirements, visa restrictions, and travel bans");
-  lines.push("• Team member locations and emergency extraction routes");
+  // Comprehensive risk analysis guidance
+  lines.push("=== COMPREHENSIVE RISK ANALYSIS GUIDANCE ===");
+  lines.push("When scanning for risks, assess ALL threat vectors:");
+  lines.push("");
+  lines.push("🌦️ WEATHER: Storms, extreme temps, visibility, seasonal patterns");
+  lines.push("🌋 DISASTERS: Earthquakes, tsunamis, volcanoes, wildfires, floods");
+  lines.push("🌐 GEOPOLITICAL: Conflicts, protests, civil unrest, terrorism, sanctions");
+  lines.push("🔒 SECURITY: Crime, kidnapping, violence, cartel activity, piracy");
+  lines.push("🏥 HEALTH: Disease outbreaks, epidemics, medical infrastructure, vaccinations");
+  lines.push("🔌 INFRASTRUCTURE: Power, transport, communications, fuel, water supply");
+  lines.push("🛂 TRAVEL: Visa requirements, entry bans, quarantine, documentation");
+  lines.push("✈️ AVIATION: Flight delays, cancellations, airspace closures, airport status");
+  lines.push("💻 CYBER: Network threats, data breaches, VPN blocks, digital surveillance");
+  lines.push("💰 ECONOMIC: Currency issues, ATM availability, strikes, supply shortages");
+  lines.push("☢️ ENVIRONMENTAL: Pollution, radiation, chemical hazards, air quality");
+  lines.push("⚖️ LEGAL: Local laws, curfews, permits, prohibited items, detention risks");
+  lines.push("");
+  lines.push("Cross-reference ALL categories when assessing travel or operational risks.");
+  lines.push("Provide risk rating: LOW / MODERATE / ELEVATED / HIGH / CRITICAL");
 
   return lines.join("\n");
 }
