@@ -260,6 +260,66 @@ export type Database = {
         }
         Relationships: []
       }
+      travel_risk_reports: {
+        Row: {
+          accommodation_notes: string | null
+          areas_of_concern: Json | null
+          created_at: string
+          emergency_contacts: Json | null
+          id: string
+          key_risks: string[] | null
+          location: string
+          parsed_content: Json | null
+          report_date: string | null
+          risk_rating: string | null
+          source: string
+          storage_path: string | null
+          title: string
+          topline_advice: string | null
+          transportation_notes: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accommodation_notes?: string | null
+          areas_of_concern?: Json | null
+          created_at?: string
+          emergency_contacts?: Json | null
+          id?: string
+          key_risks?: string[] | null
+          location: string
+          parsed_content?: Json | null
+          report_date?: string | null
+          risk_rating?: string | null
+          source?: string
+          storage_path?: string | null
+          title: string
+          topline_advice?: string | null
+          transportation_notes?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accommodation_notes?: string | null
+          areas_of_concern?: Json | null
+          created_at?: string
+          emergency_contacts?: Json | null
+          id?: string
+          key_risks?: string[] | null
+          location?: string
+          parsed_content?: Json | null
+          report_date?: string | null
+          risk_rating?: string | null
+          source?: string
+          storage_path?: string | null
+          title?: string
+          topline_advice?: string | null
+          transportation_notes?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
