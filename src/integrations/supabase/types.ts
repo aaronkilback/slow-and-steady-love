@@ -260,6 +260,154 @@ export type Database = {
         }
         Relationships: []
       }
+      travel_alerts: {
+        Row: {
+          category: string | null
+          created_at: string
+          description: string | null
+          id: string
+          is_read: boolean
+          itinerary_id: string | null
+          location: string | null
+          severity: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_read?: boolean
+          itinerary_id?: string | null
+          location?: string | null
+          severity?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_read?: boolean
+          itinerary_id?: string | null
+          location?: string | null
+          severity?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travel_alerts_itinerary_id_fkey"
+            columns: ["itinerary_id"]
+            isOneToOne: false
+            referencedRelation: "travel_itineraries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      travel_flights: {
+        Row: {
+          airline: string | null
+          arrival_airport: string
+          arrival_time: string | null
+          created_at: string
+          departure_airport: string
+          departure_time: string
+          flight_number: string
+          gate: string | null
+          id: string
+          itinerary_id: string | null
+          last_checked_at: string | null
+          status: string | null
+          terminal: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          airline?: string | null
+          arrival_airport: string
+          arrival_time?: string | null
+          created_at?: string
+          departure_airport: string
+          departure_time: string
+          flight_number: string
+          gate?: string | null
+          id?: string
+          itinerary_id?: string | null
+          last_checked_at?: string | null
+          status?: string | null
+          terminal?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          airline?: string | null
+          arrival_airport?: string
+          arrival_time?: string | null
+          created_at?: string
+          departure_airport?: string
+          departure_time?: string
+          flight_number?: string
+          gate?: string | null
+          id?: string
+          itinerary_id?: string | null
+          last_checked_at?: string | null
+          status?: string | null
+          terminal?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travel_flights_itinerary_id_fkey"
+            columns: ["itinerary_id"]
+            isOneToOne: false
+            referencedRelation: "travel_itineraries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      travel_itineraries: {
+        Row: {
+          created_at: string
+          departure_date: string
+          destination: string
+          id: string
+          notes: string | null
+          return_date: string | null
+          status: string
+          trip_name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          departure_date: string
+          destination: string
+          id?: string
+          notes?: string | null
+          return_date?: string | null
+          status?: string
+          trip_name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          departure_date?: string
+          destination?: string
+          id?: string
+          notes?: string | null
+          return_date?: string | null
+          status?: string
+          trip_name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       travel_risk_reports: {
         Row: {
           accommodation_notes: string | null
