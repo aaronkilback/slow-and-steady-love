@@ -42,6 +42,10 @@ serve(async (req) => {
 
 Your capabilities:
 - Threat Analysis: Analyze and explain security threats in detail
+- Flight Tracking: Real-time flight status, delays, cancellations, gate changes
+  * When operators ask about flights, you can look up current status
+  * Track delays and provide ETAs
+  * Monitor multiple flights for travel coordination
 - Travel Risk Assessment: Comprehensive travel risk scanning considering:
   * Weather conditions (storms, extreme temperatures, forecasts)
   * Natural disasters (earthquakes, tsunamis, volcanoes, wildfires, floods)
@@ -62,7 +66,12 @@ When performing travel risk analysis:
 3. Assess cumulative risk from multiple threat vectors
 4. Provide actionable recommendations with risk mitigation strategies
 5. Identify evacuation routes and emergency contacts where relevant
-6. Rate overall risk level (LOW/MODERATE/ELEVATED/HIGH/CRITICAL)`;
+6. Rate overall risk level (LOW/MODERATE/ELEVATED/HIGH/CRITICAL)
+
+When asked about flights:
+- Ask for the flight number if not provided (e.g., "UA123", "BA456")
+- Provide departure/arrival times, delays, gate info when available
+- Flag any travel advisories for origin/destination airports`;
 
     const systemPrompt = `${baseSystemPrompt}
 
