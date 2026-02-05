@@ -2,25 +2,131 @@ import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SignalFeed } from "@/components/signal/SignalFeed";
 import { Button } from "@/components/ui/button";
-import { Bell } from "lucide-react";
+import { Bell, Check } from "lucide-react";
+import { useSignals } from "@/hooks/useFortressData";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 export default function SignalPage() {
-  const [unreadCount] = useState(3);
+  const { data: signals = [] } = useSignals();
+  const [readSignalIds, setReadSignalIds] = useState<Set<string>>(new Set());
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Critical and high signals that haven't been marked as read
+  const criticalSignals = signals.filter(
+    (s) => (s.severity === "critical" || s.severity === "high") && !readSignalIds.has(s.id)
+  );
+  const unreadCount = criticalSignals.length;
+
+  const markAsRead = (id: string) => {
+    setReadSignalIds((prev) => new Set([...prev, id]));
+  };
+
+  const markAllAsRead = () => {
+    const allIds = criticalSignals.map((s) => s.id);
+    setReadSignalIds((prev) => new Set([...prev, ...allIds]));
+  };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col h-full">
       <PageHeader 
         title="Signal Feed" 
         subtitle="Real-time security intelligence"
         action={
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            {unreadCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-critical text-[10px] font-bold text-white">
-                {unreadCount}
-              </span>
-            )}
-          </Button>
+          <Sheet open={isOpen} onOpenChange={setIsOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-critical text-[10px] font-bold text-white animate-pulse">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetHeader className="pb-4">
+                <div className="flex items-center justify-between">
+                  <SheetTitle>Notifications</SheetTitle>
+                  {unreadCount > 0 && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={markAllAsRead}
+                      className="text-xs"
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      Mark all read
+                    </Button>
+                  )}
+                </div>
+              </SheetHeader>
+              
+              <ScrollArea className="h-[calc(100vh-8rem)]">
+                {criticalSignals.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                      <Bell className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">No new alerts</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Critical and high priority signals will appear here
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pr-2">
+                    {criticalSignals.map((signal) => (
+                      <div
+                        key={signal.id}
+                        className={cn(
+                          "p-3 rounded-lg border transition-colors cursor-pointer",
+                          signal.severity === "critical" 
+                            ? "bg-critical/10 border-critical/30 hover:bg-critical/20" 
+                            : "bg-high/10 border-high/30 hover:bg-high/20"
+                        )}
+                        onClick={() => {
+                          markAsRead(signal.id);
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <Badge 
+                            variant="outline" 
+                            className={cn(
+                              "text-xs",
+                              signal.severity === "critical" ? "text-critical" : "text-high"
+                            )}
+                          >
+                            {signal.severity?.toUpperCase()}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(signal.created_at).toLocaleTimeString([], { 
+                              hour: '2-digit', 
+                              minute: '2-digit' 
+                            })}
+                          </span>
+                        </div>
+                        <h4 className="font-medium text-sm mb-1">{signal.title}</h4>
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {signal.description}
+                        </p>
+                        {signal.location && (
+                          <p className="text-xs text-primary mt-1">{signal.location}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </SheetContent>
+          </Sheet>
         }
       />
       <SignalFeed />
