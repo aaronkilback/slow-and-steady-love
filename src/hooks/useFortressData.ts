@@ -48,6 +48,7 @@ export function useSignals() {
         const { data, error } = await fortressClient
           .from(table)
           .select("*") // Fetch ALL fields for complete signal content
+          .in("status", ["active", "open", "new", "pending"])
           .order("created_at", { ascending: false })
           .limit(100);
 
