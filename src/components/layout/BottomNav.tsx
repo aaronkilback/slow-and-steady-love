@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Radio, MessageCircle, User, Plane, MessageSquareText } from "lucide-react";
+import { Radio, MessageCircle, User, Plane, MessageSquareText, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
@@ -13,6 +13,11 @@ const navItems = [
     path: "/aegis",
     label: "Aegis",
     icon: MessageCircle,
+  },
+  {
+    path: "/messages",
+    label: "Messages",
+    icon: Shield,
   },
   {
     path: "/travel",
@@ -56,7 +61,7 @@ export function BottomNav() {
               )}
               <item.icon
                 className={cn(
-                  "h-6 w-6 transition-colors duration-200",
+                  "h-5 w-5 transition-colors duration-200",
                   isActive ? "text-primary" : "text-muted-foreground"
                 )}
               />
