@@ -1,9 +1,11 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { BottomNav } from "./BottomNav";
 import { FloatingAegis } from "@/components/aegis/FloatingAegis";
+import { useLocationTracking } from "@/hooks/useLocationTracking";
 
 export function AppLayout() {
   const location = useLocation();
+  useLocationTracking();
   
   // Don't show floating Aegis on the Aegis page itself
   const showFloatingAegis = location.pathname !== "/aegis";
