@@ -14,6 +14,7 @@ import AgentChatPage from "./pages/AgentChatPage";
 import ProfilePage from "./pages/ProfilePage";
 import TravelPage from "./pages/TravelPage";
 import InstallPage from "./pages/InstallPage";
+import CommsPage from "./pages/CommsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/agent/:agentId" element={<AgentChatPage />} />
               <Route path="/travel" element={<TravelPage />} />
+              <Route path="/comms" element={<CommsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Radio, MessageCircle, User, Plane } from "lucide-react";
+import { Radio, MessageCircle, User, Plane, MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
@@ -18,6 +18,11 @@ const navItems = [
     path: "/travel",
     label: "Travel",
     icon: Plane,
+  },
+  {
+    path: "/comms",
+    label: "Comms",
+    icon: MessageSquareText,
   },
   {
     path: "/profile",
