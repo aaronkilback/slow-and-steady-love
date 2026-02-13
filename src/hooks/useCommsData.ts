@@ -58,6 +58,9 @@ export function useCommsData(investigationId: string | null) {
 
     const url = `https://udbjjeppbgwjlqmaeftn.supabase.co/functions/v1/list-communications?investigation_id=${encodeURIComponent(investigationId)}`;
 
+    console.log("[useCommsData] Fetching:", url);
+    console.log("[useCommsData] Token (first 20 chars):", token.substring(0, 20));
+
     try {
       const res = await fetch(url, {
         method: "GET",
@@ -67,8 +70,12 @@ export function useCommsData(investigationId: string | null) {
         },
       });
 
+      console.log("[useCommsData] Response status:", res.status);
+
       if (!res.ok) {
         const errText = await res.text();
+        console.error("[useCommsData] Error response body:", errText);
+        console.error("[useCommsData] Response headers:", Object.fromEntries(res.headers.entries()));
         throw new Error(errText || `HTTP ${res.status}`);
       }
 
