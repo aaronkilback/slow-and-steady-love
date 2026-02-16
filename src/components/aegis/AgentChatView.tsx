@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, Shield, Loader2, Plus, History, Trash2, Eye, Search, Radio, ChevronLeft } from "lucide-react";
+import { Send, Mic, Shield, Loader2, Plus, History, Trash2, Eye, Search, Radio, Ghost, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +17,7 @@ const agentIcons: Record<string, React.ElementType> = {
   sentinel: Eye,
   osint: Search,
   monitor: Radio,
+  wraith: Ghost,
 };
 
 function getWelcomeContent(agent: AgentConfig): string {
