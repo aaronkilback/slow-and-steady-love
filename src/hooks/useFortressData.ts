@@ -222,3 +222,83 @@ export function useRealtimeSignals(onNewSignal: (signal: Signal) => void) {
     fortressClient.removeChannel(channel);
   };
 }
+
+// Wraith cyber threat findings from Fortress
+export interface WraithFinding {
+  id: string;
+  title: string;
+  description: string;
+  severity: "critical" | "high" | "medium" | "low";
+  threat_type: string;
+  vector: string;
+  created_at: string;
+  status?: string;
+  recommendation?: string;
+  raw?: Record<string, any>;
+}
+
+export function useWraithFindings() {
+  return useQuery({
+    queryKey: ["fortress-wraith-findings"],
+    queryFn: async () => {
+      // Try Wraith-specific tables first, then fall back to signals filtered by source
+      const WRAITH_TABLES = ["wraith_findings", "cyber_threats", "device_threats"] as const;
+
+      for (const table of WRAITH_TABLES) {
+        const { data, error } = await fortressClient
+          .from(table)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (!error && data) {
+          return (data || []).map((finding: any) => ({
+            id: finding.id,
+            title: finding.title || finding.name || "Untitled Threat",
+            description: finding.description || finding.summary || "",
+            severity: finding.severity || finding.risk_level || "medium",
+            threat_type: finding.threat_type || finding.type || finding.category || "unknown",
+            vector: finding.vector || finding.attack_vector || finding.source || "unknown",
+            created_at: finding.created_at,
+            status: finding.status || "detected",
+            recommendation: finding.recommendation || finding.mitigation || finding.action || null,
+            raw: finding,
+          })) as WraithFinding[];
+        }
+
+        const code = (error as any)?.code;
+        if (code && code !== "PGRST205" && code !== "42P01") {
+          console.warn(`Error fetching from ${table}:`, error);
+          break;
+        }
+      }
+
+      // Fallback: filter signals from Wraith source
+      const { data: signalData, error: signalError } = await fortressClient
+        .from("signals")
+        .select("*")
+        .or("source.ilike.%wraith%,category.ilike.%cyber%,category.ilike.%device%,category.ilike.%wifi%,category.ilike.%bluetooth%")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (!signalError && signalData) {
+        return (signalData || []).map((s: any) => ({
+          id: s.id,
+          title: s.title || "Untitled Threat",
+          description: s.description || "",
+          severity: s.severity || "medium",
+          threat_type: s.category || "cyber",
+          vector: s.source || "network",
+          created_at: s.created_at,
+          status: s.status || "detected",
+          recommendation: s.details || null,
+          raw: s,
+        })) as WraithFinding[];
+      }
+
+      return [];
+    },
+    staleTime: 1000 * 30,
+    refetchInterval: 1000 * 60,
+  });
+}
