@@ -316,6 +316,8 @@ export type Database = {
           arrival_airport: string
           arrival_time: string | null
           created_at: string
+          delay_minutes: number | null
+          delay_reason: string | null
           departure_airport: string
           departure_time: string
           flight_number: string
@@ -323,6 +325,7 @@ export type Database = {
           id: string
           itinerary_id: string | null
           last_checked_at: string | null
+          reservation_code: string | null
           status: string | null
           terminal: string | null
           updated_at: string
@@ -333,6 +336,8 @@ export type Database = {
           arrival_airport: string
           arrival_time?: string | null
           created_at?: string
+          delay_minutes?: number | null
+          delay_reason?: string | null
           departure_airport: string
           departure_time: string
           flight_number: string
@@ -340,6 +345,7 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_checked_at?: string | null
+          reservation_code?: string | null
           status?: string | null
           terminal?: string | null
           updated_at?: string
@@ -350,6 +356,8 @@ export type Database = {
           arrival_airport?: string
           arrival_time?: string | null
           created_at?: string
+          delay_minutes?: number | null
+          delay_reason?: string | null
           departure_airport?: string
           departure_time?: string
           flight_number?: string
@@ -357,6 +365,7 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_checked_at?: string | null
+          reservation_code?: string | null
           status?: string | null
           terminal?: string | null
           updated_at?: string

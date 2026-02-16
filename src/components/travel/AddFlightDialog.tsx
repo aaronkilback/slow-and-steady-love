@@ -28,10 +28,12 @@ export function AddFlightDialog({ open, onOpenChange }: AddFlightDialogProps) {
   const { itineraries } = useTravelItineraries();
   
   const [flightNumber, setFlightNumber] = useState("");
+  const [reservationCode, setReservationCode] = useState("");
   const [airline, setAirline] = useState("");
   const [departureAirport, setDepartureAirport] = useState("");
   const [arrivalAirport, setArrivalAirport] = useState("");
   const [departureTime, setDepartureTime] = useState("");
+  const [arrivalTime, setArrivalTime] = useState("");
   const [itineraryId, setItineraryId] = useState<string>("");
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,19 +42,23 @@ export function AddFlightDialog({ open, onOpenChange }: AddFlightDialogProps) {
 
     await addFlight({
       flight_number: flightNumber.toUpperCase(),
+      reservation_code: reservationCode.toUpperCase() || undefined,
       airline: airline || undefined,
       departure_airport: departureAirport.toUpperCase(),
       arrival_airport: arrivalAirport.toUpperCase(),
       departure_time: new Date(departureTime).toISOString(),
+      arrival_time: arrivalTime ? new Date(arrivalTime).toISOString() : undefined,
       itinerary_id: itineraryId || undefined,
     });
 
     // Reset form
     setFlightNumber("");
+    setReservationCode("");
     setAirline("");
     setDepartureAirport("");
     setArrivalAirport("");
     setDepartureTime("");
+    setArrivalTime("");
     setItineraryId("");
     onOpenChange(false);
   };
@@ -78,14 +84,26 @@ export function AddFlightDialog({ open, onOpenChange }: AddFlightDialogProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="airline">Airline</Label>
+              <Label htmlFor="reservation-code">Reservation / PNR</Label>
               <Input
-                id="airline"
-                placeholder="e.g., United"
-                value={airline}
-                onChange={(e) => setAirline(e.target.value)}
+                id="reservation-code"
+                placeholder="e.g., ABC123"
+                value={reservationCode}
+                onChange={(e) => setReservationCode(e.target.value)}
+                className="font-mono uppercase"
+                maxLength={10}
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="airline">Airline</Label>
+            <Input
+              id="airline"
+              placeholder="e.g., United Airlines"
+              value={airline}
+              onChange={(e) => setAirline(e.target.value)}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -115,15 +133,26 @@ export function AddFlightDialog({ open, onOpenChange }: AddFlightDialogProps) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="departure-time">Departure Date & Time *</Label>
-            <Input
-              id="departure-time"
-              type="datetime-local"
-              value={departureTime}
-              onChange={(e) => setDepartureTime(e.target.value)}
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="departure-time">Departure *</Label>
+              <Input
+                id="departure-time"
+                type="datetime-local"
+                value={departureTime}
+                onChange={(e) => setDepartureTime(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="arrival-time">Arrival</Label>
+              <Input
+                id="arrival-time"
+                type="datetime-local"
+                value={arrivalTime}
+                onChange={(e) => setArrivalTime(e.target.value)}
+              />
+            </div>
           </div>
 
           {itineraries.length > 0 && (
