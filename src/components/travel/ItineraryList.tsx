@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Calendar, 
+  Camera,
   ChevronRight, 
   MapPin, 
   Plus, 
   Trash2 
 } from "lucide-react";
 import { AddItineraryDialog } from "./AddItineraryDialog";
+import { UploadItineraryDialog } from "./UploadItineraryDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +37,7 @@ const statusColors: Record<string, string> = {
 export function ItineraryList() {
   const { itineraries, isLoading, deleteItinerary } = useTravelItineraries();
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   if (isLoading) {
@@ -64,14 +67,24 @@ export function ItineraryList() {
     <>
       <ScrollArea className="h-full">
         <div className="p-4 space-y-3">
-          <Button 
-            onClick={() => setShowAddDialog(true)} 
-            className="w-full gap-2"
-            variant="outline"
-          >
-            <Plus className="h-4 w-4" />
-            Add Trip
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button 
+              onClick={() => setShowAddDialog(true)} 
+              className="gap-2"
+              variant="outline"
+            >
+              <Plus className="h-4 w-4" />
+              Add Trip
+            </Button>
+            <Button
+              onClick={() => setShowUploadDialog(true)}
+              className="gap-2"
+              variant="outline"
+            >
+              <Camera className="h-4 w-4" />
+              Scan Itinerary
+            </Button>
+          </div>
 
           {itineraries.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -130,6 +143,11 @@ export function ItineraryList() {
       <AddItineraryDialog 
         open={showAddDialog} 
         onOpenChange={setShowAddDialog} 
+      />
+
+      <UploadItineraryDialog
+        open={showUploadDialog}
+        onOpenChange={setShowUploadDialog}
       />
 
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
