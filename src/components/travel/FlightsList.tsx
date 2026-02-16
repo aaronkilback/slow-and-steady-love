@@ -6,11 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
+  AlertTriangle,
   Clock, 
   Loader2, 
   Plane, 
   Plus, 
   RefreshCw, 
+  Ticket,
   Trash2 
 } from "lucide-react";
 import { AddFlightDialog } from "./AddFlightDialog";
@@ -69,11 +71,29 @@ export function FlightsList() {
     try {
       const result = await checkFlightStatus(flight.flight_number);
       
-      // Update flight with any new info from the lookup
-      if (result?.summary) {
-        toast.success(`${flight.flight_number}: ${result.summary.slice(0, 100)}`);
-        
-        // Update last_checked timestamp
+      if (result?.parsed) {
+        const parsed = result.parsed;
+        const updates: Record<string, unknown> = {
+          last_checked_at: new Date().toISOString(),
+        };
+
+        if (parsed.status) updates.status = parsed.status;
+        if (parsed.gate) updates.gate = parsed.gate;
+        if (parsed.terminal) updates.terminal = parsed.terminal;
+        if (parsed.delay_minutes !== undefined) updates.delay_minutes = parsed.delay_minutes;
+        if (parsed.delay_reason) updates.delay_reason = parsed.delay_reason;
+
+        await updateFlight({ id: flight.id, updates });
+
+        if (parsed.status === "delayed") {
+          toast.warning(`${flight.flight_number} is delayed${parsed.delay_minutes ? ` by ${parsed.delay_minutes} min` : ""}`);
+        } else if (parsed.status === "cancelled") {
+          toast.error(`${flight.flight_number} has been cancelled`);
+        } else {
+          toast.success(`${flight.flight_number}: ${parsed.status || "on time"}`);
+        }
+      } else if (result?.result) {
+        toast.success(`${flight.flight_number}: ${result.result.slice(0, 100)}`);
         await updateFlight({
           id: flight.id,
           updates: { last_checked_at: new Date().toISOString() },
@@ -113,17 +133,26 @@ export function FlightsList() {
             flights.map((flight) => (
               <Card 
                 key={flight.id} 
-                className="bg-card/50 group"
+                className={`bg-card/50 group ${flight.status === "delayed" ? "border-yellow-500/40" : flight.status === "cancelled" ? "border-destructive/40" : ""}`}
               >
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-mono font-bold text-lg">{flight.flight_number}</h3>
                         {flight.airline && (
                           <span className="text-sm text-muted-foreground">({flight.airline})</span>
                         )}
                       </div>
+
+                      {flight.reservation_code && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Ticket className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-xs font-mono text-muted-foreground">
+                            PNR: {flight.reservation_code}
+                          </span>
+                        </div>
+                      )}
                       
                       <div className="flex items-center gap-2 text-sm mb-3">
                         <span className="font-medium">{flight.departure_airport}</span>
@@ -132,7 +161,7 @@ export function FlightsList() {
                       </div>
                       
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className={statusColors[flight.status]}>
+                        <Badge variant="outline" className={statusColors[flight.status] || statusColors.scheduled}>
                           {flight.status}
                         </Badge>
                         
@@ -141,6 +170,12 @@ export function FlightsList() {
                           {format(new Date(flight.departure_time), "MMM d, h:mm a")}
                         </span>
 
+                        {flight.arrival_time && (
+                          <span className="text-xs text-muted-foreground">
+                            → {format(new Date(flight.arrival_time), "h:mm a")}
+                          </span>
+                        )}
+
                         {flight.gate && (
                           <Badge variant="secondary">Gate {flight.gate}</Badge>
                         )}
@@ -148,6 +183,16 @@ export function FlightsList() {
                           <Badge variant="secondary">T{flight.terminal}</Badge>
                         )}
                       </div>
+
+                      {flight.delay_minutes > 0 && (
+                        <div className="flex items-center gap-1.5 mt-2 text-yellow-400">
+                          <AlertTriangle className="h-3 w-3" />
+                          <span className="text-xs font-medium">
+                            Delayed {flight.delay_minutes} min
+                            {flight.delay_reason && ` — ${flight.delay_reason}`}
+                          </span>
+                        </div>
+                      )}
 
                       {flight.last_checked_at && (
                         <p className="text-xs text-muted-foreground mt-2">

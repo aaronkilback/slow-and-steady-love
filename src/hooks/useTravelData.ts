@@ -23,6 +23,7 @@ export interface TravelFlight {
   user_id: string;
   flight_number: string;
   airline: string | null;
+  reservation_code: string | null;
   departure_airport: string;
   arrival_airport: string;
   departure_time: string;
@@ -30,6 +31,8 @@ export interface TravelFlight {
   status: "scheduled" | "delayed" | "cancelled" | "departed" | "arrived";
   gate: string | null;
   terminal: string | null;
+  delay_minutes: number;
+  delay_reason: string | null;
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
@@ -166,6 +169,7 @@ export function useTravelFlights(itineraryId?: string) {
     mutationFn: async (params: {
       flight_number: string;
       airline?: string;
+      reservation_code?: string;
       departure_airport: string;
       arrival_airport: string;
       departure_time: string;
