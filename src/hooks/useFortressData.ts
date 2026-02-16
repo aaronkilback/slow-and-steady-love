@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fortressClient } from "@/lib/fortress-client";
+import { supabase } from "@/integrations/supabase/client";
 
 // Types matching Fortress platform database - complete signal data
 export interface Signal {
@@ -241,64 +242,106 @@ export function useWraithFindings() {
   return useQuery({
     queryKey: ["fortress-wraith-findings"],
     queryFn: async () => {
-      // Try Wraith-specific tables first, then fall back to signals filtered by source
-      const WRAITH_TABLES = ["wraith_findings", "cyber_threats", "device_threats"] as const;
+      // Fetch from Fortress tables AND breach check in parallel
+      const tableFindings = await fetchWraithTableFindings();
+      const breachFindings = await fetchBreachCheckFindings();
 
-      for (const table of WRAITH_TABLES) {
-        const { data, error } = await fortressClient
-          .from(table)
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(100);
-
-        if (!error && data) {
-          return (data || []).map((finding: any) => ({
-            id: finding.id,
-            title: finding.title || finding.name || "Untitled Threat",
-            description: finding.description || finding.summary || "",
-            severity: finding.severity || finding.risk_level || "medium",
-            threat_type: finding.threat_type || finding.type || finding.category || "unknown",
-            vector: finding.vector || finding.attack_vector || finding.source || "unknown",
-            created_at: finding.created_at,
-            status: finding.status || "detected",
-            recommendation: finding.recommendation || finding.mitigation || finding.action || null,
-            raw: finding,
-          })) as WraithFinding[];
-        }
-
-        const code = (error as any)?.code;
-        if (code && code !== "PGRST205" && code !== "42P01") {
-          console.warn(`Error fetching from ${table}:`, error);
-          break;
-        }
-      }
-
-      // Fallback: filter signals from Wraith source
-      const { data: signalData, error: signalError } = await fortressClient
-        .from("signals")
-        .select("*")
-        .or("source.ilike.%wraith%,category.ilike.%cyber%,category.ilike.%device%,category.ilike.%wifi%,category.ilike.%bluetooth%")
-        .order("created_at", { ascending: false })
-        .limit(100);
-
-      if (!signalError && signalData) {
-        return (signalData || []).map((s: any) => ({
-          id: s.id,
-          title: s.title || "Untitled Threat",
-          description: s.description || "",
-          severity: s.severity || "medium",
-          threat_type: s.category || "cyber",
-          vector: s.source || "network",
-          created_at: s.created_at,
-          status: s.status || "detected",
-          recommendation: s.details || null,
-          raw: s,
-        })) as WraithFinding[];
-      }
-
-      return [];
+      // Merge and deduplicate by id, breach findings first (more actionable)
+      const allFindings = [...breachFindings, ...tableFindings];
+      const seen = new Set<string>();
+      return allFindings.filter((f) => {
+        if (seen.has(f.id)) return false;
+        seen.add(f.id);
+        return true;
+      });
     },
     staleTime: 1000 * 30,
-    refetchInterval: 1000 * 60,
+    refetchInterval: 1000 * 60 * 5, // 5 min for breach data
   });
+}
+
+async function fetchWraithTableFindings(): Promise<WraithFinding[]> {
+  const WRAITH_TABLES = ["wraith_findings", "cyber_threats", "device_threats"] as const;
+
+  for (const table of WRAITH_TABLES) {
+    const { data, error } = await fortressClient
+      .from(table)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (!error && data) {
+      return (data || []).map((finding: any) => ({
+        id: finding.id,
+        title: finding.title || finding.name || "Untitled Threat",
+        description: finding.description || finding.summary || "",
+        severity: finding.severity || finding.risk_level || "medium",
+        threat_type: finding.threat_type || finding.type || finding.category || "unknown",
+        vector: finding.vector || finding.attack_vector || finding.source || "unknown",
+        created_at: finding.created_at,
+        status: finding.status || "detected",
+        recommendation: finding.recommendation || finding.mitigation || finding.action || null,
+        raw: finding,
+      })) as WraithFinding[];
+    }
+
+    const code = (error as any)?.code;
+    if (code && code !== "PGRST205" && code !== "42P01") {
+      console.warn(`Error fetching from ${table}:`, error);
+      break;
+    }
+  }
+
+  // Fallback: filter signals from Wraith source
+  const { data: signalData, error: signalError } = await fortressClient
+    .from("signals")
+    .select("*")
+    .or("source.ilike.%wraith%,category.ilike.%cyber%,category.ilike.%device%,category.ilike.%wifi%,category.ilike.%bluetooth%")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (!signalError && signalData) {
+    return (signalData || []).map((s: any) => ({
+      id: s.id,
+      title: s.title || "Untitled Threat",
+      description: s.description || "",
+      severity: s.severity || "medium",
+      threat_type: s.category || "cyber",
+      vector: s.source || "network",
+      created_at: s.created_at,
+      status: s.status || "detected",
+      recommendation: s.details || null,
+      raw: s,
+    })) as WraithFinding[];
+  }
+
+  return [];
+}
+
+async function fetchBreachCheckFindings(): Promise<WraithFinding[]> {
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session?.access_token) return [];
+
+    const response = await supabase.functions.invoke("wraith-breach-check", {
+      headers: {
+        Authorization: `Bearer ${sessionData.session.access_token}`,
+      },
+    });
+
+    if (response.error) {
+      console.warn("Breach check failed:", response.error);
+      return [];
+    }
+
+    const result = response.data;
+    if (result?.findings && Array.isArray(result.findings)) {
+      return result.findings as WraithFinding[];
+    }
+
+    return [];
+  } catch (err) {
+    console.warn("Breach check error:", err);
+    return [];
+  }
 }
