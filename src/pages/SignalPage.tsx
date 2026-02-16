@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SignalFeed } from "@/components/signal/SignalFeed";
+import { WraithFeed } from "@/components/signal/WraithFeed";
 import { Button } from "@/components/ui/button";
-import { Bell, Check } from "lucide-react";
+import { Bell, Check, Ghost, Radio } from "lucide-react";
 import { useSignals } from "@/hooks/useFortressData";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -92,9 +94,7 @@ export default function SignalPage() {
                             ? "bg-critical/10 border-critical/30 hover:bg-critical/20" 
                             : "bg-high/10 border-high/30 hover:bg-high/20"
                         )}
-                        onClick={() => {
-                          markAsRead(signal.id);
-                        }}
+                        onClick={() => markAsRead(signal.id)}
                       >
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <Badge 
@@ -129,7 +129,34 @@ export default function SignalPage() {
           </Sheet>
         }
       />
-      <SignalFeed />
+
+      <Tabs defaultValue="signals" className="flex-1 flex flex-col">
+        <div className="px-4 border-b border-border">
+          <TabsList className="w-full bg-transparent h-10 p-0 gap-0">
+            <TabsTrigger 
+              value="signals" 
+              className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <Radio className="h-4 w-4 mr-1.5" />
+              Signals
+            </TabsTrigger>
+            <TabsTrigger 
+              value="cyber" 
+              className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <Ghost className="h-4 w-4 mr-1.5" />
+              Cyber Threats
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        
+        <TabsContent value="signals" className="flex-1 mt-0">
+          <SignalFeed />
+        </TabsContent>
+        <TabsContent value="cyber" className="flex-1 mt-0">
+          <WraithFeed />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
