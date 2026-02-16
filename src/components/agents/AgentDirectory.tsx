@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Shield, Eye, Radio, Search, User, Bot, MessageCircle, Loader2, RefreshCw } from "lucide-react";
+import { Shield, Eye, Radio, Search, User, Bot, MessageCircle, Loader2, RefreshCw, Ghost } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +63,7 @@ const agentIcons: Record<string, React.ElementType> = {
   sentinel: Eye,
   osint: Search,
   monitor: Radio,
+  wraith: Ghost,
 };
 
 function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => void }) {
