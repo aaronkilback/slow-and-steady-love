@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.wraith-breach-check]
 verify_jwt = false
+
+[functions.parse-itinerary]
+verify_jwt = false
