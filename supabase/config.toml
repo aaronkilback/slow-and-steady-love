@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.flight-lookup]
 verify_jwt = false
+
+[functions.wraith-breach-check]
+verify_jwt = false
