@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.parse-itinerary]
 verify_jwt = false
+
+[functions.flight-auto-scan]
+verify_jwt = false
