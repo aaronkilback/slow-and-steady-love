@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Camera, Loader2, Plane, MapPin, Ticket, CheckCircle } from "lucide-react";
+import { Camera, Loader2, Plane, MapPin, Ticket, CheckCircle, Radar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,8 +44,9 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
   const [isProcessing, setIsProcessing] = useState(false);
   const [extracted, setExtracted] = useState<ExtractedItinerary | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [scanPhase, setScanPhase] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addFlight } = useTravelFlights();
+  const { addFlight, checkFlightStatus, updateFlight } = useTravelFlights();
   const { createItinerary } = useTravelItineraries();
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,6 +102,8 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
       const { data: { user } } = await fortressClient.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
+      setScanPhase("Creating trip...");
+
       // Create itinerary
       let itineraryId: string | undefined;
       const tripName = extracted.trip_name || `Trip to ${extracted.destination}`;
@@ -115,10 +118,12 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
 
       itineraryId = itinerary?.id;
 
-      // Create flights
+      // Create flights and collect their IDs
+      const savedFlights: { id: string; flight_number: string }[] = [];
       if (extracted.flights?.length) {
         for (const flight of extracted.flights) {
-          await addFlight({
+          setScanPhase(`Adding ${flight.flight_number}...`);
+          const saved = await addFlight({
             flight_number: flight.flight_number.toUpperCase(),
             reservation_code: flight.reservation_code?.toUpperCase(),
             airline: flight.airline,
@@ -128,16 +133,65 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
             arrival_time: flight.arrival_time ? new Date(flight.arrival_time).toISOString() : undefined,
             itinerary_id: itineraryId,
           });
+          if (saved?.id) {
+            savedFlights.push({ id: saved.id, flight_number: flight.flight_number.toUpperCase() });
+          }
         }
       }
 
-      toast.success(`Created "${tripName}" with ${extracted.flights?.length || 0} flight(s)`);
+      // Auto-scan each flight for delays/alerts
+      let alertsCreated = 0;
+      for (const sf of savedFlights) {
+        setScanPhase(`Scanning ${sf.flight_number} for delays...`);
+        try {
+          const result = await checkFlightStatus(sf.flight_number);
+          if (result?.parsed) {
+            const parsed = result.parsed;
+            const updates: Record<string, unknown> = {
+              last_checked_at: new Date().toISOString(),
+            };
+            if (parsed.status) updates.status = parsed.status;
+            if (parsed.gate) updates.gate = parsed.gate;
+            if (parsed.terminal) updates.terminal = parsed.terminal;
+            if (parsed.delay_minutes !== undefined) updates.delay_minutes = parsed.delay_minutes;
+            if (parsed.delay_reason) updates.delay_reason = parsed.delay_reason;
+
+            await updateFlight({ id: sf.id, updates });
+
+            // Create alert for delays or cancellations
+            if (parsed.status === "delayed" || parsed.status === "cancelled") {
+              const severity = parsed.status === "cancelled" ? "critical" : "warning";
+              const title = parsed.status === "cancelled"
+                ? `${sf.flight_number} Cancelled`
+                : `${sf.flight_number} Delayed${parsed.delay_minutes ? ` ${parsed.delay_minutes}min` : ""}`;
+
+              await supabase.from("travel_alerts").insert({
+                user_id: user.id,
+                itinerary_id: itineraryId || null,
+                title,
+                description: parsed.delay_reason || `Flight ${sf.flight_number} is ${parsed.status}`,
+                severity,
+                category: "aviation",
+                location: extracted.destination,
+              });
+              alertsCreated++;
+            }
+          }
+        } catch {
+          // Non-critical — flight saved, status check failed
+        }
+      }
+
+      setScanPhase(null);
+      const alertMsg = alertsCreated > 0 ? ` · ${alertsCreated} alert(s)` : "";
+      toast.success(`Created "${tripName}" with ${savedFlights.length} flight(s)${alertMsg}`);
       setExtracted(null);
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save itinerary");
     } finally {
       setIsSaving(false);
+      setScanPhase(null);
     }
   };
 
@@ -244,8 +298,15 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
               </div>
             )}
 
+            {scanPhase && (
+              <div className="flex items-center gap-2 text-xs text-primary">
+                <Radar className="h-3.5 w-3.5 animate-pulse" />
+                <span>{scanPhase}</span>
+              </div>
+            )}
+
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={handleClose}>
+              <Button variant="outline" className="flex-1" onClick={handleClose} disabled={isSaving}>
                 Cancel
               </Button>
               <Button className="flex-1 gap-2" onClick={handleSave} disabled={isSaving}>
@@ -254,7 +315,7 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
                 ) : (
                   <CheckCircle className="h-4 w-4" />
                 )}
-                Save All
+                {isSaving ? "Scanning..." : "Save & Scan"}
               </Button>
             </div>
           </div>
