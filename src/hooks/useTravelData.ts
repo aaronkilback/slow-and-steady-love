@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { fortressClient } from "@/lib/fortress-client";
 import { toast } from "sonner";
 
 export interface TravelItinerary {
@@ -71,7 +72,7 @@ export function useTravelItineraries() {
       return_date?: string;
       notes?: string;
     }) => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await fortressClient.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
@@ -171,7 +172,7 @@ export function useTravelFlights(itineraryId?: string) {
       arrival_time?: string;
       itinerary_id?: string;
     }) => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await fortressClient.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
