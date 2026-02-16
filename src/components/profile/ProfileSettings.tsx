@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 import { MuteSettings } from "./MuteSettings";
+import { ChangePasswordForm } from "./ChangePasswordForm";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 interface SettingItemProps {
@@ -153,29 +154,24 @@ export function ProfileSettings() {
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
             Security
           </h3>
-          <Card className="divide-y divide-border border-border bg-card">
-            <div className="px-3">
-              <SettingItem
-                icon={Fingerprint}
-                label="Biometric Login"
-                description="Use fingerprint or face ID"
-                action={
-                  <Switch
-                    checked={biometricEnabled}
-                    onCheckedChange={setBiometricEnabled}
-                  />
-                }
-              />
-            </div>
-            <div className="px-3">
-              <SettingItem
-                icon={Shield}
-                label="Security Settings"
-                description="Password, 2FA, and sessions"
-                onClick={() => {}}
-              />
-            </div>
-          </Card>
+          <div className="space-y-3">
+            <ChangePasswordForm />
+            <Card className="divide-y divide-border border-border bg-card">
+              <div className="px-3">
+                <SettingItem
+                  icon={Fingerprint}
+                  label="Biometric Login"
+                  description="Use fingerprint or face ID"
+                  action={
+                    <Switch
+                      checked={biometricEnabled}
+                      onCheckedChange={setBiometricEnabled}
+                    />
+                  }
+                />
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* App Section */}

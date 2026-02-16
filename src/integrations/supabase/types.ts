@@ -237,6 +237,7 @@ export type Database = {
           full_name: string
           id: string
           key_salt: string | null
+          password_changed_at: string | null
           public_key: string | null
           updated_at: string
         }
@@ -246,6 +247,7 @@ export type Database = {
           full_name: string
           id: string
           key_salt?: string | null
+          password_changed_at?: string | null
           public_key?: string | null
           updated_at?: string
         }
@@ -255,6 +257,7 @@ export type Database = {
           full_name?: string
           id?: string
           key_salt?: string | null
+          password_changed_at?: string | null
           public_key?: string | null
           updated_at?: string
         }
