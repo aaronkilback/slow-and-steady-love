@@ -49,6 +49,7 @@ export function useSignals() {
         const { data, error } = await fortressClient
           .from(table)
           .select("*") // Fetch ALL fields for complete signal content
+          .eq("tab", "recent") // Only pull from the Recent tab
           .order("created_at", { ascending: false })
           .limit(100);
 
