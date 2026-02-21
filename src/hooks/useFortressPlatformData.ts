@@ -101,6 +101,7 @@ export function useFortressPlatformData(): FortressPlatformData {
         const result = await fortressClient
           .from(table)
           .select("id, type, priority, title, description, status, created_at")
+          .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(20);
         return result;
