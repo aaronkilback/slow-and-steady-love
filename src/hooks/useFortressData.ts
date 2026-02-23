@@ -57,9 +57,9 @@ export function useSignals() {
           .order("created_at", { ascending: false })
           .limit(100);
 
-        if (!withTab.error && withTab.data) {
+        if (!withTab.error && withTab.data && withTab.data.length > 0) {
           data = withTab.data;
-        } else {
+        } else if (withTab.error || !withTab.data || withTab.data.length === 0) {
           // "tab" column may not exist – retry without filter
           const withoutTab = await fortressClient
             .from(table)

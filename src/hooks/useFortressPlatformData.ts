@@ -105,7 +105,7 @@ export function useFortressPlatformData(): FortressPlatformData {
           .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(20);
-        if (!withTab.error && withTab.data) return withTab;
+        if (!withTab.error && withTab.data && withTab.data.length > 0) return withTab;
         // Fall back without tab filter if column doesn't exist
         return await fortressClient
           .from(table)
