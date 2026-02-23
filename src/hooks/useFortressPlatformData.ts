@@ -98,13 +98,20 @@ export function useFortressPlatformData(): FortressPlatformData {
     try {
       // Fetch signals - recent active signals
       const signalsData = await tryFetchFromTables<Signal>(SIGNAL_TABLES, async (table) => {
-        const result = await fortressClient
+        // Try with "tab=recent" filter first
+        const withTab = await fortressClient
           .from(table)
           .select("id, type, priority, title, description, status, created_at")
           .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(20);
-        return result;
+        if (!withTab.error && withTab.data) return withTab;
+        // Fall back without tab filter if column doesn't exist
+        return await fortressClient
+          .from(table)
+          .select("id, type, priority, title, description, status, created_at")
+          .order("created_at", { ascending: false })
+          .limit(20);
       });
       setSignals(signalsData);
 
