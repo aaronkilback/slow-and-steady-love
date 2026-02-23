@@ -46,15 +46,35 @@ export function useSignals() {
       const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
       
       for (const table of SIGNAL_TABLES) {
-        const { data, error } = await fortressClient
+        // Try with "tab=recent" filter first, fall back to unfiltered if column doesn't exist
+        let data: any[] | null = null;
+        let lastError: any = null;
+
+        const withTab = await fortressClient
           .from(table)
-          .select("*") // Fetch ALL fields for complete signal content
-          .eq("tab", "recent") // Only pull from the Recent tab
+          .select("*")
+          .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(100);
 
-        if (!error && data) {
-          // Map to Signal interface, preserving all extra fields
+        if (!withTab.error && withTab.data) {
+          data = withTab.data;
+        } else {
+          // "tab" column may not exist – retry without filter
+          const withoutTab = await fortressClient
+            .from(table)
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(100);
+
+          if (!withoutTab.error && withoutTab.data) {
+            data = withoutTab.data;
+          } else {
+            lastError = withoutTab.error || withTab.error;
+          }
+        }
+
+        if (data) {
           return (data || []).map((signal: any) => ({
             id: signal.id,
             title: signal.title || signal.name || "Untitled Signal",
@@ -65,17 +85,16 @@ export function useSignals() {
             created_at: signal.created_at,
             location: signal.location || signal.geo_location || null,
             details: signal.details || signal.content || signal.raw_data || signal.body || null,
-            // Preserve additional fields for full context
             status: signal.status,
             assignee: signal.assignee || signal.assigned_to,
             metadata: signal.metadata || signal.extra_data,
-            raw: signal, // Keep full raw signal for complete access
+            raw: signal,
           })) as Signal[];
         }
 
-        const code = (error as any)?.code;
+        const code = (lastError as any)?.code;
         if (code && code !== "PGRST205" && code !== "42P01") {
-          console.warn(`Error fetching from ${table}:`, error);
+          console.warn(`Error fetching from ${table}:`, lastError);
           break;
         }
       }
