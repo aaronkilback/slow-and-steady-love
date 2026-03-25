@@ -9,10 +9,11 @@ export function useLocationTracking() {
   const watchId = useRef<number | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSent = useRef<{ lat: number; lng: number; ts: number } | null>(null);
+  const tableAvailable = useRef<boolean | null>(null); // null = unknown, false = not available
 
   const sendLocation = useCallback(
     async (lat: number, lng: number) => {
-      if (!user) return;
+      if (!user || tableAvailable.current === false) return;
 
       // Skip if position hasn't meaningfully changed (< ~50 m) and was sent recently
       if (lastSent.current) {
@@ -35,11 +36,13 @@ export function useLocationTracking() {
           );
 
         if (!error) {
+          tableAvailable.current = true;
           lastSent.current = { lat, lng, ts: Date.now() };
         } else {
           const code = (error as any)?.code;
-          // Silently skip if table doesn't exist on this platform
-          if (code !== "42P01" && code !== "PGRST205") {
+          if (code === "42P01" || code === "PGRST205" || (error as any)?.status === 404) {
+            tableAvailable.current = false; // stop retrying
+          } else {
             console.error("[location-tracking] upsert error:", error.message);
           }
         }

@@ -22,7 +22,7 @@ export function PasswordExpiryBanner() {
         .from("profiles")
         .select("password_changed_at")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!data?.password_changed_at) return;
 
