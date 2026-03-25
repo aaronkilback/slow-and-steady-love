@@ -73,11 +73,16 @@ export function useAegisChat() {
     // Do not filter by user_id — Fortress RLS handles per-user scoping
     const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
-      .select("id, title, updated_at")
-      .order("updated_at", { ascending: false });
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(50);
+
+    console.log("[Aegis] loadConversations →", { table: CONVERSATION_TABLE, data, error });
 
     if (!error && data) {
-      setConversations(data);
+      setConversations(
+        data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
+      );
       if (data.length > 0 && !currentConversationId) {
         setCurrentConversationId(data[0].id);
       }
@@ -100,9 +105,11 @@ export function useAegisChat() {
 
     const { data, error } = await fortressClient
       .from(MESSAGE_TABLE)
-      .select("id, role, content, created_at")
+      .select("*")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
+
+    console.log("[Aegis] loadMessages →", { table: MESSAGE_TABLE, conversationId, data, error });
 
     if (!error && data) {
       setMessages(
