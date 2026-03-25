@@ -3,13 +3,17 @@ import { fortressClient } from "@/lib/fortress-client";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 const TRACKING_INTERVAL = 60_000; // Update every 60 seconds
+const LS_KEY = "fortress_location_tracking_disabled";
 
 export function useLocationTracking() {
   const { user } = useAuth();
   const watchId = useRef<number | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSent = useRef<{ lat: number; lng: number; ts: number } | null>(null);
-  const tableAvailable = useRef<boolean | null>(null); // null = unknown, false = not available
+  // Persist "table not found" across page loads so we never probe again
+  const tableAvailable = useRef<boolean | null>(
+    localStorage.getItem(LS_KEY) === "1" ? false : null
+  );
   const requestInFlight = useRef(false);
 
   const sendLocation = useCallback(
@@ -45,6 +49,7 @@ export function useLocationTracking() {
           const code = (error as any)?.code;
           if (code === "42P01" || code === "PGRST205" || (error as any)?.status === 404) {
             tableAvailable.current = false; // stop retrying
+            localStorage.setItem(LS_KEY, "1"); // persist across page loads
           } else {
             console.error("[location-tracking] upsert error:", error.message);
           }

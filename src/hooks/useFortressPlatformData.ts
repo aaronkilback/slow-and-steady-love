@@ -60,10 +60,16 @@ const PROFILE_TABLES = ["profiles", "users", "operators"] as const;
 const AGENT_TABLES = ["agents", "ai_agents"] as const;
 const CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
 
+// localStorage keys to persist "table not found" across page loads
+const LS_LOCATIONS_DISABLED = "fortress_locations_table_disabled";
+const LS_AGENTS_DISABLED = "fortress_agents_table_disabled";
+
 async function tryFetchFromTables<T>(
   tables: readonly string[],
-  queryFn: (table: string) => Promise<{ data: T[] | null; error: any }>
+  queryFn: (table: string) => Promise<{ data: T[] | null; error: any }>,
+  disabledKey?: string
 ): Promise<T[]> {
+  if (disabledKey && localStorage.getItem(disabledKey) === "1") return [];
   for (const table of tables) {
     try {
       const { data, error } = await queryFn(table);
@@ -82,6 +88,8 @@ async function tryFetchFromTables<T>(
       console.warn(`Exception fetching from ${table}:`, e);
     }
   }
+  // All tables failed — persist so we skip on next page load
+  if (disabledKey) localStorage.setItem(disabledKey, "1");
   return [];
 }
 
@@ -123,7 +131,7 @@ export function useFortressPlatformData(): FortressPlatformData {
           .order("updated_at", { ascending: false })
           .limit(50);
         return result;
-      });
+      }, LS_LOCATIONS_DISABLED);
       setLocations(locationsData);
 
       // Fetch team profiles — select("*") to avoid full_name/name column mismatch
@@ -143,7 +151,7 @@ export function useFortressPlatformData(): FortressPlatformData {
       // Fetch agents — select("*") to avoid column-name mismatches
       const agentsRaw = await tryFetchFromTables<any>(AGENT_TABLES, async (table) => {
         return await fortressClient.from(table).select("*").limit(50);
-      });
+      }, LS_AGENTS_DISABLED);
       const agentsData: Agent[] = agentsRaw.map((a: any) => ({
         id: a.id,
         name: a.name || a.agent_name || a.title || a.id,
