@@ -81,7 +81,14 @@ export function useAegisChat() {
       return;
     }
 
-    if (error) console.warn("Failed to load conversations:", error.message);
+    if (error) {
+      console.warn("Failed to load conversations:", error.message);
+      toast({
+        variant: "destructive",
+        title: "Could not load chat history",
+        description: error.message,
+      });
+    }
     setConversations([]);
   };
 

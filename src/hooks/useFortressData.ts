@@ -45,37 +45,58 @@ export function useSignals() {
       // Try multiple table names for cross-platform compatibility
       const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
       
+      const mapSignals = (data: any[]): Signal[] =>
+        data.map((signal: any) => ({
+          id: signal.id,
+          title: signal.title || signal.name || "Untitled Signal",
+          description: signal.description || signal.summary || "",
+          severity: signal.severity || signal.priority || "low",
+          category: signal.category || signal.type || "General",
+          source: signal.source || signal.origin || "Platform",
+          created_at: signal.created_at,
+          location: signal.location || signal.geo_location || null,
+          details: signal.details || signal.content || signal.raw_data || signal.body || null,
+          status: signal.status,
+          assignee: signal.assignee || signal.assigned_to,
+          metadata: signal.metadata || signal.extra_data,
+          raw: signal,
+        }));
+
       for (const table of SIGNAL_TABLES) {
-        const { data, error } = await fortressClient
+        // Try with tab=recent filter first
+        const withTab = await fortressClient
           .from(table)
           .select("*")
           .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(100);
 
-        if (!error && data) {
-          return data.map((signal: any) => ({
-            id: signal.id,
-            title: signal.title || signal.name || "Untitled Signal",
-            description: signal.description || signal.summary || "",
-            severity: signal.severity || signal.priority || "low",
-            category: signal.category || signal.type || "General",
-            source: signal.source || signal.origin || "Platform",
-            created_at: signal.created_at,
-            location: signal.location || signal.geo_location || null,
-            details: signal.details || signal.content || signal.raw_data || signal.body || null,
-            status: signal.status,
-            assignee: signal.assignee || signal.assigned_to,
-            metadata: signal.metadata || signal.extra_data,
-            raw: signal,
-          })) as Signal[];
+        if (!withTab.error && withTab.data) {
+          return mapSignals(withTab.data);
         }
 
-        const code = (error as any)?.code;
-        if (code && code !== "PGRST205" && code !== "42P01") {
-          console.warn(`Error fetching from ${table}:`, error);
-          break;
+        const code = (withTab.error as any)?.code;
+        const msg = (withTab.error as any)?.message || "";
+
+        // Table doesn't exist — try the next one
+        if (code === "PGRST205" || code === "42P01") continue;
+
+        // Column 'tab' doesn't exist — fall back to all signals for this table
+        if (code === "42703" || msg.includes("tab")) {
+          const withoutTab = await fortressClient
+            .from(table)
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(100);
+
+          if (!withoutTab.error && withoutTab.data) {
+            return mapSignals(withoutTab.data);
+          }
         }
+
+        // Any other error — stop trying
+        console.warn(`Error fetching signals from ${table}:`, withTab.error);
+        break;
       }
 
       return [];
