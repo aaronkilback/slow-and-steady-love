@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { fortressClient } from "@/lib/fortress-client";
+import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -67,7 +68,7 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
-    const { data, error } = await fortressClient
+    const { data, error } = await supabase
       .from(CONVERSATION_TABLE)
       .select("id, title, updated_at")
       .eq("user_id", userId)
@@ -95,7 +96,7 @@ export function useAegisChat() {
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    const { data, error } = await fortressClient
+    const { data, error } = await supabase
       .from(MESSAGE_TABLE)
       .select("id, role, content, created_at")
       .eq("conversation_id", conversationId)
@@ -125,7 +126,7 @@ export function useAegisChat() {
       return null;
     }
 
-    const { data, error } = await fortressClient
+    const { data, error } = await supabase
       .from(CONVERSATION_TABLE)
       .insert({ user_id: userId })
       .select("id")
@@ -147,7 +148,7 @@ export function useAegisChat() {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await fortressClient
+    const { data, error } = await supabase
       .from(MESSAGE_TABLE)
       .insert({
         conversation_id: conversationId,
@@ -163,7 +164,7 @@ export function useAegisChat() {
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await fortressClient.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
+    await supabase.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
     loadConversations();
   };
 
@@ -358,7 +359,7 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    await fortressClient.from(CONVERSATION_TABLE).delete().eq("id", id);
+    await supabase.from(CONVERSATION_TABLE).delete().eq("id", id);
     
     if (currentConversationId === id) {
       setCurrentConversationId(null);
