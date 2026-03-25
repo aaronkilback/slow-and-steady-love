@@ -26,8 +26,19 @@ interface OperatorProfile {
 const AEGIS_CHAT_URL = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/aegis-chat`;
 
 // Fortress platform table names — try in order until one works
-const CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
-const MESSAGE_TABLES = ["agent_messages", "aegis_messages"] as const;
+const CONVERSATION_TABLES = [
+  "agent_conversations",
+  "aegis_conversations",
+  "conversations",
+  "chat_sessions",
+  "chats",
+] as const;
+const MESSAGE_TABLES = [
+  "agent_messages",
+  "aegis_messages",
+  "messages",
+  "chat_messages",
+] as const;
 const CONVERSATION_TABLE = CONVERSATION_TABLES[0];
 const MESSAGE_TABLE = MESSAGE_TABLES[0];
 
@@ -81,6 +92,7 @@ export function useAegisChat() {
 
 
       if (!error && data) {
+        console.log(`[Aegis] found conversations in table: ${table}, count: ${data.length}`);
         setConversations(
           data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
         );
