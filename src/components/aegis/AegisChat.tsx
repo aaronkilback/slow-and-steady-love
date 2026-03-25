@@ -103,42 +103,41 @@ You have full access to platform intelligence. Reference signals, team status, a
     
     // For voice, we manually save to database since we already have the response
     try {
-      // Use local supabase client (not fortressClient)
-      const { supabase } = await import("@/integrations/supabase/client");
-      const { data: { user } } = await supabase.auth.getUser();
+      const { fortressClient } = await import("@/lib/fortress-client");
+      const { data: { user } } = await fortressClient.auth.getUser();
       if (!user) return;
-      
+
       let convId = currentConversationId;
-      
+
       // Create conversation if needed
       if (!convId) {
-        const { data: newConv } = await supabase
+        const { data: newConv } = await fortressClient
           .from("aegis_conversations")
           .insert({ user_id: user.id, title: userText.slice(0, 50) + (userText.length > 50 ? "..." : "") })
           .select("id")
           .single();
-        
+
         if (newConv?.id) {
           convId = newConv.id;
         }
       }
-      
+
       if (!convId) return;
-      
+
       // Save user message
       if (userText.trim()) {
-        await supabase.from("aegis_messages").insert({
+        await fortressClient.from("aegis_messages").insert({
           conversation_id: convId,
           role: "user",
           content: `🎤 ${userText.trim()}`,
         });
       }
-      
+
       // Save assistant response
       if (assistantText.trim()) {
-        await supabase.from("aegis_messages").insert({
+        await fortressClient.from("aegis_messages").insert({
           conversation_id: convId,
-          role: "assistant", 
+          role: "assistant",
           content: assistantText.trim(),
         });
       }

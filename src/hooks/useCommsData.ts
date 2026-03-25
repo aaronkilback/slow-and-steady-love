@@ -56,15 +56,14 @@ export function useCommsData(investigationId: string | null) {
       return;
     }
 
-    const url = `https://udbjjeppbgwjlqmaeftn.supabase.co/functions/v1/list-communications?investigation_id=${encodeURIComponent(investigationId)}`;
-
+    const url = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/list-communications?investigation_id=${encodeURIComponent(investigationId)}`;
 
     try {
       const res = await fetch(url, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
-          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkYmpqZXBwYmd3amxxbWFlZnRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzNDkwNjQsImV4cCI6MjA3NDkyNTA2NH0.4wtCRvIKYPcl8gQLSC86PoWvbVKFJPmRzOKDW9tV-Ec",
+          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwdXF1a3BwYm13ZWJpcHRxbW9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjMwMjAsImV4cCI6MjA4ODIzOTAyMH0.x36k-kAUtPXmmZloojPc0-b1sd67d7-5pBOViN0EmXc",
         },
       });
 
@@ -136,14 +135,14 @@ export function useCommsData(investigationId: string | null) {
       const token = session.data.session?.access_token;
       if (!token) throw new Error("Not authenticated");
 
-      const url = `https://udbjjeppbgwjlqmaeftn.supabase.co/functions/v1/send-sms`;
+      const url = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/send-sms`;
 
       const res = await fetch(url, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
-          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkYmpqZXBwYmd3amxxbWFlZnRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzNDkwNjQsImV4cCI6MjA3NDkyNTA2NH0.4wtCRvIKYPcl8gQLSC86PoWvbVKFJPmRzOKDW9tV-Ec",
+          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwdXF1a3BwYm13ZWJpcHRxbW9nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NjMwMjAsImV4cCI6MjA4ODIzOTAyMH0.x36k-kAUtPXmmZloojPc0-b1sd67d7-5pBOViN0EmXc",
         },
         body: JSON.stringify({
           investigation_id: investigationId,

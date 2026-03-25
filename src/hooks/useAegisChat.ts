@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -25,7 +24,7 @@ interface OperatorProfile {
 // Use the local Supabase edge function for AI chat
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
-// Table names in local Lovable Cloud database
+// Table names — stored in Fortress so history is shared across devices
 const CONVERSATION_TABLE = "aegis_conversations";
 const MESSAGE_TABLE = "aegis_messages";
 
@@ -107,7 +106,7 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .select("id, title, updated_at")
       .eq("user_id", userId)
@@ -128,7 +127,7 @@ export function useAegisChat() {
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(MESSAGE_TABLE)
       .select("id, role, content, created_at")
       .eq("conversation_id", conversationId)
@@ -158,7 +157,7 @@ export function useAegisChat() {
       return null;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .insert({ user_id: userId })
       .select("id")
@@ -180,7 +179,7 @@ export function useAegisChat() {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(MESSAGE_TABLE)
       .insert({
         conversation_id: conversationId,
@@ -196,7 +195,7 @@ export function useAegisChat() {
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await supabase.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
+    await fortressClient.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
     loadConversations();
   };
 
@@ -264,11 +263,13 @@ export function useAegisChat() {
     ];
 
     try {
+      const { data: { session } } = await fortressClient.auth.getSession();
+      const token = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(AEGIS_CHAT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           messages: apiMessages,
@@ -389,7 +390,7 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    await supabase.from(CONVERSATION_TABLE).delete().eq("id", id);
+    await fortressClient.from(CONVERSATION_TABLE).delete().eq("id", id);
     
     if (currentConversationId === id) {
       setCurrentConversationId(null);
