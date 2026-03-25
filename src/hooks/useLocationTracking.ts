@@ -37,7 +37,11 @@ export function useLocationTracking() {
         if (!error) {
           lastSent.current = { lat, lng, ts: Date.now() };
         } else {
-          console.error("[location-tracking] upsert error:", error.message);
+          const code = (error as any)?.code;
+          // Silently skip if table doesn't exist on this platform
+          if (code !== "42P01" && code !== "PGRST205") {
+            console.error("[location-tracking] upsert error:", error.message);
+          }
         }
       } catch (err) {
         console.error("[location-tracking] send failed:", err);
