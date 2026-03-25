@@ -70,10 +70,10 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
+    // Do not filter by user_id — Fortress RLS handles per-user scoping
     const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .select("id, title, updated_at")
-      .eq("user_id", userId)
       .order("updated_at", { ascending: false });
 
     if (!error && data) {
@@ -128,9 +128,10 @@ export function useAegisChat() {
       return null;
     }
 
+    // Fortress sets user_id automatically via RLS/trigger — no need to pass it
     const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
-      .insert({ user_id: userId })
+      .insert({})
       .select("id")
       .single();
 

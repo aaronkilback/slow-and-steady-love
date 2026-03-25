@@ -114,7 +114,7 @@ You have full access to platform intelligence. Reference signals, team status, a
       if (!convId) {
         const { data: newConv } = await fortressClient
           .from("agent_conversations")
-          .insert({ user_id: user.id, title: userText.slice(0, 50) + (userText.length > 50 ? "..." : "") })
+          .insert({ title: userText.slice(0, 50) + (userText.length > 50 ? "..." : "") })
           .select("id")
           .single();
 

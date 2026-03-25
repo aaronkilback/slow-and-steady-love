@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SignalFeed } from "@/components/signal/SignalFeed";
-import { WraithFeed } from "@/components/signal/WraithFeed";
 import { Button } from "@/components/ui/button";
-import { Bell, Check, Ghost, Radio } from "lucide-react";
+import { Bell, Check } from "lucide-react";
 import { useSignals } from "@/hooks/useFortressData";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -145,33 +143,9 @@ export default function SignalPage() {
         }
       />
 
-      <Tabs defaultValue="signals" className="flex-1 flex flex-col">
-        <div className="px-4 border-b border-border">
-          <TabsList className="w-full bg-transparent h-10 p-0 gap-0">
-            <TabsTrigger 
-              value="signals" 
-              className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              <Radio className="h-4 w-4 mr-1.5" />
-              Signals
-            </TabsTrigger>
-            <TabsTrigger 
-              value="cyber" 
-              className="flex-1 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              <Ghost className="h-4 w-4 mr-1.5" />
-              Cyber Threats
-            </TabsTrigger>
-          </TabsList>
-        </div>
-        
-        <TabsContent value="signals" className="flex-1 mt-0">
-          <SignalFeed />
-        </TabsContent>
-        <TabsContent value="cyber" className="flex-1 mt-0">
-          <WraithFeed />
-        </TabsContent>
-      </Tabs>
+      <div className="flex-1 flex flex-col mt-0">
+        <SignalFeed />
+      </div>
     </div>
   );
 }
