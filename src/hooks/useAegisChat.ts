@@ -92,7 +92,6 @@ export function useAegisChat() {
 
 
       if (!error && data) {
-        console.log(`[Aegis] found conversations in table: ${table}, count: ${data.length}`);
         setConversations(
           data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
         );
