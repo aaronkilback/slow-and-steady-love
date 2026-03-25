@@ -15,6 +15,8 @@ import ProfilePage from "./pages/ProfilePage";
 import TravelPage from "./pages/TravelPage";
 import InstallPage from "./pages/InstallPage";
 import CommsPage from "./pages/CommsPage";
+import SOSPage from "./pages/SOSPage";
+import NetworkScanPage from "./pages/NetworkScanPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -43,6 +45,8 @@ const App = () => (
               <Route path="/travel" element={<TravelPage />} />
               <Route path="/comms" element={<CommsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/sos" element={<SOSPage />} />
+              <Route path="/network-scan" element={<NetworkScanPage />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

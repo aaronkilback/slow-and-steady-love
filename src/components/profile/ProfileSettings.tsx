@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint, Loader2 } from "lucide-react";
+import { User, Bell, Shield, LogOut, ChevronRight, Moon, Volume2, Fingerprint, Loader2, AlertTriangle, Wifi } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
 import { MuteSettings } from "./MuteSettings";
 import { ChangePasswordForm } from "./ChangePasswordForm";
+import { BreachChecker } from "./BreachChecker";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 interface SettingItemProps {
@@ -170,8 +171,32 @@ export function ProfileSettings() {
                   }
                 />
               </div>
+              <div className="px-3">
+                <SettingItem
+                  icon={Wifi}
+                  label="Network Security Scan"
+                  description="Detect Wi-Fi & Bluetooth attacks"
+                  onClick={() => navigate("/network-scan")}
+                />
+              </div>
+              <div className="px-3">
+                <SettingItem
+                  icon={AlertTriangle}
+                  label="Emergency SOS"
+                  description="Alert your team with GPS location"
+                  onClick={() => navigate("/sos")}
+                />
+              </div>
             </Card>
           </div>
+        </div>
+
+        {/* Breach Check Section */}
+        <div>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+            Exposure Check
+          </h3>
+          <BreachChecker />
         </div>
 
         {/* App Section */}
