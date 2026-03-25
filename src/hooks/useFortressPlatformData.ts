@@ -100,13 +100,6 @@ export function useFortressPlatformData(): FortressPlatformData {
     try {
       // Fetch signals - use select("*") to avoid column-name mismatches
       const signalsData = await tryFetchFromTables<Signal>(SIGNAL_TABLES, async (table) => {
-        const withTab = await fortressClient
-          .from(table)
-          .select("*")
-          .eq("tab", "recent")
-          .order("created_at", { ascending: false })
-          .limit(20);
-        if (!withTab.error && withTab.data && withTab.data.length > 0) return withTab;
         return await fortressClient
           .from(table)
           .select("*")

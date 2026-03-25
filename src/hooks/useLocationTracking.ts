@@ -10,10 +10,12 @@ export function useLocationTracking() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastSent = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const tableAvailable = useRef<boolean | null>(null); // null = unknown, false = not available
+  const requestInFlight = useRef(false);
 
   const sendLocation = useCallback(
     async (lat: number, lng: number) => {
       if (!user || tableAvailable.current === false) return;
+      if (tableAvailable.current === null && requestInFlight.current) return;
 
       // Skip if position hasn't meaningfully changed (< ~50 m) and was sent recently
       if (lastSent.current) {
@@ -22,6 +24,7 @@ export function useLocationTracking() {
         if (dist < 0.0005 && elapsed < TRACKING_INTERVAL) return;
       }
 
+      requestInFlight.current = true;
       try {
         const { error } = await fortressClient
           .from("user_locations")
@@ -48,6 +51,8 @@ export function useLocationTracking() {
         }
       } catch (err) {
         console.error("[location-tracking] send failed:", err);
+      } finally {
+        requestInFlight.current = false;
       }
     },
     [user]
