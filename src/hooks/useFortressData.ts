@@ -62,47 +62,19 @@ export function useSignals() {
           raw: signal,
         }));
 
-      const fetchAllFromTable = (table: string) =>
-        fortressClient
-          .from(table)
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(100);
-
       for (const table of SIGNAL_TABLES) {
-        // Try with tab=recent filter first
-        const withTab = await fortressClient
+        const { data, error } = await fortressClient
           .from(table)
           .select("*")
-          .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(100);
 
-        if (!withTab.error && withTab.data) {
-          // If tab=recent returns results, use them
-          if (withTab.data.length > 0) {
-            return mapSignals(withTab.data);
-          }
-          // tab=recent returned empty — fall back to all signals for this table
-          const withoutTab = await fetchAllFromTable(table);
-          if (!withoutTab.error && withoutTab.data) {
-            return mapSignals(withoutTab.data);
-          }
-          break;
-        }
+        if (!error && data) return mapSignals(data);
 
-        const code = (withTab.error as any)?.code;
-
-        // Table doesn't exist — try the next one
+        const code = (error as any)?.code;
         if (code === "PGRST205" || code === "42P01") continue;
 
-        // Any other error (bad column, permission issue, etc.) — try without tab filter
-        const withoutTab = await fetchAllFromTable(table);
-        if (!withoutTab.error && withoutTab.data) {
-          return mapSignals(withoutTab.data);
-        }
-
-        console.warn(`Error fetching signals from ${table}:`, withTab.error);
+        console.warn(`Error fetching signals from ${table}:`, error);
         break;
       }
 
