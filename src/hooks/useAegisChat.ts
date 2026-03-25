@@ -79,7 +79,6 @@ export function useAegisChat() {
         .order("updated_at", { ascending: false })
         .limit(50);
 
-      console.log("[Aegis] loadConversations →", { table, data, error });
 
       if (!error && data) {
         setConversations(
@@ -116,7 +115,6 @@ export function useAegisChat() {
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
 
-      console.log("[Aegis] loadMessages →", { table, conversationId, data: result.data, error: result.error });
 
       if (!result.error && result.data) { data = result.data; break; }
       const code = (result.error as any)?.code;
