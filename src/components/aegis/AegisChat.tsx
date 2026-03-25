@@ -105,7 +105,6 @@ You have full access to platform intelligence. Reference signals, team status, a
     // For voice, we manually save to database since we already have the response
     try {
       const { fortressClient } = await import("@/lib/fortress-client");
-      const { supabase } = await import("@/integrations/supabase/client");
       const { data: { user } } = await fortressClient.auth.getUser();
       if (!user) return;
 
@@ -113,8 +112,8 @@ You have full access to platform intelligence. Reference signals, team status, a
 
       // Create conversation if needed
       if (!convId) {
-        const { data: newConv } = await supabase
-          .from("aegis_conversations")
+        const { data: newConv } = await fortressClient
+          .from("agent_conversations")
           .insert({ user_id: user.id, title: userText.slice(0, 50) + (userText.length > 50 ? "..." : "") })
           .select("id")
           .single();
@@ -128,7 +127,7 @@ You have full access to platform intelligence. Reference signals, team status, a
 
       // Save user message
       if (userText.trim()) {
-        await supabase.from("aegis_messages").insert({
+        await fortressClient.from("agent_messages").insert({
           conversation_id: convId,
           role: "user",
           content: `🎤 ${userText.trim()}`,
@@ -137,7 +136,7 @@ You have full access to platform intelligence. Reference signals, team status, a
 
       // Save assistant response
       if (assistantText.trim()) {
-        await supabase.from("aegis_messages").insert({
+        await fortressClient.from("agent_messages").insert({
           conversation_id: convId,
           role: "assistant",
           content: assistantText.trim(),
