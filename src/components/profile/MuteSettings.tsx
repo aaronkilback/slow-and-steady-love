@@ -38,7 +38,7 @@ export function MuteSettings() {
     const { data, error } = await supabase
       .from('mute_preferences')
       .select('*')
-      .single();
+      .maybeSingle();
 
     if (data) {
       setEnabled(data.enabled);
