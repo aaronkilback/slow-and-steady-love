@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, MicOff, Shield, Loader2, Plus, History, Trash2 } from "lucide-react";
+import { Send, Mic, Shield, Loader2, Plus, History, Trash2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -39,6 +39,7 @@ export function AegisChat() {
   const { signals, locations, profiles, agents } = useFortressPlatformData();
 
   const [input, setInput] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
   const [currentTranscript, setCurrentTranscript] = useState("");
   const [aegisResponse, setAegisResponse] = useState("");
@@ -291,9 +292,23 @@ You have full access to platform intelligence. Reference signals, team status, a
               <SheetHeader>
                 <SheetTitle>Conversation History</SheetTitle>
               </SheetHeader>
-              <ScrollArea className="h-[calc(100vh-8rem)] mt-4">
+              <div className="relative mt-4 mb-3">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search conversations..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <ScrollArea className="h-[calc(100vh-11rem)]">
                 <div className="space-y-2 pr-4">
-                  {conversations.map((conv) => (
+                  {conversations
+                    .filter((conv) =>
+                      !historySearch ||
+                      (conv.title || "").toLowerCase().includes(historySearch.toLowerCase())
+                    )
+                    .map((conv) => (
                     <div
                       key={conv.id}
                       className={cn(
@@ -328,6 +343,13 @@ You have full access to platform intelligence. Reference signals, team status, a
                   {conversations.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
                       No previous conversations
+                    </p>
+                  )}
+                  {conversations.length > 0 && historySearch && conversations.filter((conv) =>
+                    (conv.title || "").toLowerCase().includes(historySearch.toLowerCase())
+                  ).length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">
+                      No matches for "{historySearch}"
                     </p>
                   )}
                 </div>
@@ -415,10 +437,9 @@ You have full access to platform intelligence. Reference signals, team status, a
           <Button
             variant="ghost"
             size="icon"
-            onClick={handleOpenVoiceMode}
+            onClick={isSupported ? handleOpenVoiceMode : undefined}
             disabled={!isSupported}
             className="shrink-0 transition-all hover:text-primary"
-            title={!isSupported ? "Voice not supported" : "Open voice mode"}
           >
             <Mic className="h-5 w-5" />
           </Button>
@@ -440,6 +461,11 @@ You have full access to platform intelligence. Reference signals, team status, a
             <Send className="h-5 w-5" />
           </Button>
         </div>
+        {!isSupported && (
+          <p className="text-[11px] text-muted-foreground text-center mt-2">
+            Voice mode is not supported on this device
+          </p>
+        )}
       </div>
 
       {/* Fullscreen Voice Mode */}

@@ -216,12 +216,17 @@ export default function SOSPage() {
               </div>
 
               {location && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary rounded-lg px-4 py-2">
+                <a
+                  href={`https://maps.google.com/maps?q=${location.lat},${location.lng}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-muted-foreground bg-secondary rounded-lg px-4 py-2 hover:bg-secondary/80 transition-colors"
+                >
                   <MapPin className="h-4 w-4 text-primary shrink-0" />
                   <span className="font-mono text-xs">
                     {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
                   </span>
-                </div>
+                </a>
               )}
 
               <p className="text-sm text-muted-foreground max-w-xs">

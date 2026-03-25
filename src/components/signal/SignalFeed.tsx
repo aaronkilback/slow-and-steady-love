@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, Shield, Eye, Radio, Clock, MapPin, ChevronDown, ChevronUp, RefreshCw, Loader2 } from "lucide-react";
+import { AlertTriangle, Shield, Eye, Radio, Clock, MapPin, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { useSignals, Signal as SignalType } from "@/hooks/useFortressData";
 import { fortressClient } from "@/lib/fortress-client";
 
@@ -131,30 +130,25 @@ function SignalCard({ signal }: { signal: SignalType }) {
                     </div>
                   )}
                   
-                  {/* Metadata section - show all extra platform data */}
+                  {/* Metadata section - formatted key-value pairs */}
                   {signal.metadata && Object.keys(signal.metadata).length > 0 && (
                     <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Additional Data</p>
-                      <div className="bg-secondary/50 rounded-lg p-2 text-xs font-mono overflow-x-auto">
-                        <pre className="whitespace-pre-wrap text-foreground">
-                          {JSON.stringify(signal.metadata, null, 2)}
-                        </pre>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">Additional Data</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        {Object.entries(signal.metadata as Record<string, unknown>)
+                          .filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
+                          .map(([key, value]) => (
+                            <div key={key}>
+                              <p className="text-[10px] text-muted-foreground capitalize">
+                                {key.replace(/_/g, " ")}
+                              </p>
+                              <p className="text-xs text-foreground font-medium truncate">
+                                {String(value)}
+                              </p>
+                            </div>
+                          ))}
                       </div>
                     </div>
-                  )}
-
-                  {/* Raw data access - complete platform signal */}
-                  {signal.raw && (
-                    <details className="text-xs">
-                      <summary className="text-muted-foreground cursor-pointer hover:text-primary transition-colors">
-                        View raw signal data
-                      </summary>
-                      <div className="mt-2 bg-secondary/50 rounded-lg p-2 font-mono overflow-x-auto max-h-48 overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-foreground text-[10px]">
-                          {JSON.stringify(signal.raw, null, 2)}
-                        </pre>
-                      </div>
-                    </details>
                   )}
                   
                   {/* Core Metadata */}
@@ -191,7 +185,7 @@ function SignalCard({ signal }: { signal: SignalType }) {
 }
 
 export function SignalFeed() {
-  const { data: signals = [], isLoading, refetch, isRefetching } = useSignals();
+  const { data: signals = [], isLoading } = useSignals();
   const [localSignals, setLocalSignals] = useState<SignalType[]>([]);
 
   // Update local signals when data changes
@@ -236,21 +230,10 @@ export function SignalFeed() {
 
   return (
     <div className="flex-1 flex flex-col">
-      {/* Refresh header */}
-      <div className="px-4 py-2 flex items-center justify-between border-b border-border">
+      <div className="px-4 py-2 border-b border-border">
         <span className="text-xs text-muted-foreground">
-          {localSignals.length} signals
+          {localSignals.length} signals · live
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => refetch()}
-          disabled={isRefetching}
-          className="h-8 px-2"
-        >
-          <RefreshCw className={cn("h-4 w-4 mr-1", isRefetching && "animate-spin")} />
-          Refresh
-        </Button>
       </div>
 
       <ScrollArea className="flex-1 px-4 py-4">

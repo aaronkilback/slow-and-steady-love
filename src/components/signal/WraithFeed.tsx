@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useWraithFindings, WraithFinding } from "@/hooks/useFortressData";
-import { PasswordCheckCard } from "./PasswordCheckCard";
 
 type Severity = "critical" | "high" | "medium" | "low";
 
@@ -206,7 +205,6 @@ export function WraithFeed() {
 
       <ScrollArea className="flex-1 px-4 py-4">
         <div className="space-y-3 pb-4">
-          <PasswordCheckCard />
           {findings.length === 0 ? (
             <div className="text-center py-12">
               <Ghost className="h-12 w-12 mx-auto mb-3 text-primary opacity-50" />

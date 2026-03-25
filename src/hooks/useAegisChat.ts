@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { fortressClient } from "@/lib/fortress-client";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 interface Message {
   id: string;
@@ -29,69 +30,29 @@ const CONVERSATION_TABLE = "aegis_conversations";
 const MESSAGE_TABLE = "aegis_messages";
 
 export function useAegisChat() {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
   const [conversations, setConversations] = useState<AegisConversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [operator, setOperator] = useState<OperatorProfile | null>(null);
   const { toast } = useToast();
 
-  // Get current user from Fortress
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await fortressClient.auth.getUser();
-      if (user) {
-        setUserId(user.id);
+  // Derive operator directly from the already-resolved auth user
+  const operator: OperatorProfile | null = user
+    ? {
+        id: user.id,
+        name: user.user_metadata?.name ?? user.user_metadata?.full_name ?? null,
       }
-    };
-    getUser();
+    : null;
 
-    // Listen for auth changes
-    const { data: { subscription } } = fortressClient.auth.onAuthStateChange((_, session) => {
-      setUserId(session?.user?.id || null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Load user's conversations from Fortress when user is available
+  // Load conversations when auth resolves
   useEffect(() => {
     if (userId) {
       loadConversations();
     }
-  }, [userId]);
-
-  // Load operator profile from auth user_metadata (most reliable source on Fortress)
-  useEffect(() => {
-    if (!userId) {
-      setOperator(null);
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      // Get the name from user_metadata which is always available from auth
-      const { data: { user } } = await fortressClient.auth.getUser();
-      
-      if (cancelled) return;
-      
-      if (user) {
-        // user_metadata.name is the most reliable source on Fortress
-        const operatorName = user.user_metadata?.name ?? user.user_metadata?.full_name ?? null;
-        setOperator({ 
-          id: user.id, 
-          name: operatorName,
-        });
-      } else {
-        setOperator({ id: userId, name: null });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [userId]);
 
   // Load messages when conversation changes

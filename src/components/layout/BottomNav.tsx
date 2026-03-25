@@ -1,7 +1,8 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Radio, MessageCircle, User, Plane, MessageSquareText, Shield } from "lucide-react";
+import { Radio, MessageSquare, User, Plane, Bot, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { useUnreadMessages } from "@/hooks/useUnreadMessages";
 
 const navItems = [
   {
@@ -12,22 +13,22 @@ const navItems = [
   {
     path: "/aegis",
     label: "Aegis",
-    icon: MessageCircle,
+    icon: Shield,
   },
   {
     path: "/messages",
     label: "Messages",
-    icon: Shield,
+    icon: MessageSquare,
+  },
+  {
+    path: "/agents",
+    label: "Agents",
+    icon: Bot,
   },
   {
     path: "/travel",
     label: "Travel",
     icon: Plane,
-  },
-  {
-    path: "/comms",
-    label: "Comms",
-    icon: MessageSquareText,
   },
   {
     path: "/profile",
@@ -38,14 +39,16 @@ const navItems = [
 
 export function BottomNav() {
   const location = useLocation();
+  const unreadMessages = useUnreadMessages();
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg safe-area-bottom">
       <div className="flex items-center justify-around px-2 py-2">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path || 
+          const isActive = location.pathname === item.path ||
             (item.path === "/signal" && location.pathname === "/");
-          
+          const badge = item.path === "/messages" && unreadMessages > 0 ? unreadMessages : null;
+
           return (
             <NavLink
               key={item.path}
@@ -59,12 +62,19 @@ export function BottomNav() {
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}
-              <item.icon
-                className={cn(
-                  "h-5 w-5 transition-colors duration-200",
-                  isActive ? "text-primary" : "text-muted-foreground"
+              <div className="relative">
+                <item.icon
+                  className={cn(
+                    "h-5 w-5 transition-colors duration-200",
+                    isActive ? "text-primary" : "text-muted-foreground"
+                  )}
+                />
+                {badge && (
+                  <span className="absolute -right-2 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                    {badge > 9 ? "9+" : badge}
+                  </span>
                 )}
-              />
+              </div>
               <span
                 className={cn(
                   "text-xs font-medium transition-colors duration-200",

@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { MuteSettings } from "./MuteSettings";
 import { ChangePasswordForm } from "./ChangePasswordForm";
 import { BreachChecker } from "./BreachChecker";
+import { PasswordCheckCard } from "@/components/signal/PasswordCheckCard";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 interface SettingItemProps {
@@ -191,12 +192,15 @@ export function ProfileSettings() {
           </div>
         </div>
 
-        {/* Breach Check Section */}
+        {/* Security Checks */}
         <div>
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-            Exposure Check
+            Security Checks
           </h3>
-          <BreachChecker />
+          <div className="space-y-3">
+            <BreachChecker />
+            <PasswordCheckCard />
+          </div>
         </div>
 
         {/* App Section */}

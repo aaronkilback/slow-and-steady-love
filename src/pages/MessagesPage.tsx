@@ -7,8 +7,8 @@ export default function MessagesPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-5rem)]">
       <PageHeader 
-        title="Messages" 
-        subtitle="Direct & broadcast communications"
+        title="Messages"
+        subtitle="Team messaging & broadcasts"
         action={
           <Button variant="ghost" size="icon">
             <Plus className="h-5 w-5" />

@@ -19,7 +19,14 @@ import { cn } from "@/lib/utils";
 
 export default function SignalPage() {
   const { data: signals = [] } = useSignals();
-  const [readSignalIds, setReadSignalIds] = useState<Set<string>>(new Set());
+  const [readSignalIds, setReadSignalIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem("readSignalIds");
+      return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
   const [isOpen, setIsOpen] = useState(false);
 
   // Critical and high signals that haven't been marked as read
@@ -29,12 +36,20 @@ export default function SignalPage() {
   const unreadCount = criticalSignals.length;
 
   const markAsRead = (id: string) => {
-    setReadSignalIds((prev) => new Set([...prev, id]));
+    setReadSignalIds((prev) => {
+      const next = new Set([...prev, id]);
+      localStorage.setItem("readSignalIds", JSON.stringify([...next]));
+      return next;
+    });
   };
 
   const markAllAsRead = () => {
     const allIds = criticalSignals.map((s) => s.id);
-    setReadSignalIds((prev) => new Set([...prev, ...allIds]));
+    setReadSignalIds((prev) => {
+      const next = new Set([...prev, ...allIds]);
+      localStorage.setItem("readSignalIds", JSON.stringify([...next]));
+      return next;
+    });
   };
 
   return (

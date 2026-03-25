@@ -46,36 +46,15 @@ export function useSignals() {
       const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
       
       for (const table of SIGNAL_TABLES) {
-        // Try with "tab=recent" filter first, fall back to unfiltered if column doesn't exist
-        let data: any[] | null = null;
-        let lastError: any = null;
-
-        const withTab = await fortressClient
+        const { data, error } = await fortressClient
           .from(table)
           .select("*")
           .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(100);
 
-        if (!withTab.error && withTab.data && withTab.data.length > 0) {
-          data = withTab.data;
-        } else if (withTab.error || !withTab.data || withTab.data.length === 0) {
-          // "tab" column may not exist – retry without filter
-          const withoutTab = await fortressClient
-            .from(table)
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(100);
-
-          if (!withoutTab.error && withoutTab.data) {
-            data = withoutTab.data;
-          } else {
-            lastError = withoutTab.error || withTab.error;
-          }
-        }
-
-        if (data) {
-          return (data || []).map((signal: any) => ({
+        if (!error && data) {
+          return data.map((signal: any) => ({
             id: signal.id,
             title: signal.title || signal.name || "Untitled Signal",
             description: signal.description || signal.summary || "",
@@ -92,9 +71,9 @@ export function useSignals() {
           })) as Signal[];
         }
 
-        const code = (lastError as any)?.code;
+        const code = (error as any)?.code;
         if (code && code !== "PGRST205" && code !== "42P01") {
-          console.warn(`Error fetching from ${table}:`, lastError);
+          console.warn(`Error fetching from ${table}:`, error);
           break;
         }
       }

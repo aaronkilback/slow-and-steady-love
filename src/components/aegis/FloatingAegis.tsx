@@ -9,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import { useAegisChat } from "@/hooks/useAegisChat";
 import { SOSButton } from "@/components/messaging/SOSButton";
 import { useToast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 interface FloatingAegisProps {
   className?: string;
@@ -30,7 +31,8 @@ export function FloatingAegis({ className }: FloatingAegisProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  
+  const navigate = useNavigate();
+
   const {
     messages,
     isStreaming,
@@ -38,13 +40,8 @@ export function FloatingAegis({ className }: FloatingAegisProps) {
   } = useAegisChat();
 
   const handleSOSTrigger = () => {
-    toast({
-      title: "🚨 SOS Activated",
-      description: "Emergency alert sent to all available agents and operators.",
-      variant: "destructive",
-    });
-    // Send SOS message to Aegis
-    sendMessage("EMERGENCY SOS TRIGGERED - Operator requires immediate assistance. Initiate emergency protocols.");
+    // Navigate to the full SOS page for proper GPS + critical signal flow
+    navigate("/sos");
   };
 
   useEffect(() => {

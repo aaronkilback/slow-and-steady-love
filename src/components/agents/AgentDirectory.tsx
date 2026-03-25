@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Shield, Eye, Radio, Search, User, Bot, MessageCircle, Loader2, RefreshCw, Ghost } from "lucide-react";
+import { Shield, Eye, Radio, Search, User, Bot, Loader2, RefreshCw, Ghost } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -70,12 +70,6 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
   const status = statusConfig[agent.status || "offline"];
   const Icon = agentIcons[agent.id] || Shield;
 
-  const handleChat = () => {
-    if (agent.status !== "offline") {
-      onChat(agent);
-    }
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -83,9 +77,12 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
       whileHover={{ scale: 1.01 }}
       transition={{ duration: 0.2 }}
     >
-      <Card 
-        className="p-4 border-border bg-card hover:bg-card/80 transition-colors cursor-pointer"
-        onClick={handleChat}
+      <Card
+        className={cn(
+          "p-4 border-border bg-card transition-colors",
+          agent.status !== "offline" ? "cursor-pointer hover:bg-card/80" : "opacity-60"
+        )}
+        onClick={() => agent.status !== "offline" && onChat(agent)}
       >
         <div className="flex items-start gap-3">
           <div className={cn(
@@ -98,7 +95,7 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
               status.dotColor
             )} />
           </div>
-          
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-foreground truncate">{agent.name}</h3>
@@ -111,7 +108,7 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
               {agent.description}
             </p>
-            
+
             <div className="flex flex-wrap gap-1 mt-2">
               {agent.capabilities.slice(0, 3).map((cap) => (
                 <Badge key={cap} variant="secondary" className="text-[10px] px-1.5 py-0">
@@ -125,19 +122,6 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
               )}
             </div>
           </div>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            disabled={agent.status === "offline"}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleChat();
-            }}
-          >
-            <MessageCircle className="h-5 w-5" />
-          </Button>
         </div>
       </Card>
     </motion.div>
@@ -153,12 +137,6 @@ function OperatorCard({ operator, onChat }: { operator: Operator; onChat: (opera
     .slice(0, 2)
     .toUpperCase();
 
-  const handleChat = () => {
-    if (operator.status !== "offline") {
-      onChat(operator);
-    }
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -166,9 +144,12 @@ function OperatorCard({ operator, onChat }: { operator: Operator; onChat: (opera
       whileHover={{ scale: 1.01 }}
       transition={{ duration: 0.2 }}
     >
-      <Card 
-        className="p-4 border-border bg-card hover:bg-card/80 transition-colors cursor-pointer"
-        onClick={handleChat}
+      <Card
+        className={cn(
+          "p-4 border-border bg-card transition-colors",
+          operator.status !== "offline" ? "cursor-pointer hover:bg-card/80" : "opacity-60"
+        )}
+        onClick={() => operator.status !== "offline" && onChat(operator)}
       >
         <div className="flex items-start gap-3">
           <div className="relative">
@@ -183,7 +164,7 @@ function OperatorCard({ operator, onChat }: { operator: Operator; onChat: (opera
               status.dotColor
             )} />
           </div>
-          
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-foreground truncate">{operator.full_name}</h3>
@@ -193,19 +174,6 @@ function OperatorCard({ operator, onChat }: { operator: Operator; onChat: (opera
             </div>
             <p className="text-xs text-primary mt-0.5">{operator.role || "Security Operator"}</p>
           </div>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            disabled={operator.status === "offline"}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleChat();
-            }}
-          >
-            <MessageCircle className="h-5 w-5" />
-          </Button>
         </div>
       </Card>
     </motion.div>
