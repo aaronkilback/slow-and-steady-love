@@ -62,6 +62,13 @@ export function useSignals() {
           raw: signal,
         }));
 
+      const fetchAllFromTable = (table: string) =>
+        fortressClient
+          .from(table)
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(100);
+
       for (const table of SIGNAL_TABLES) {
         // Try with tab=recent filter first
         const withTab = await fortressClient
@@ -72,29 +79,29 @@ export function useSignals() {
           .limit(100);
 
         if (!withTab.error && withTab.data) {
-          return mapSignals(withTab.data);
+          // If tab=recent returns results, use them
+          if (withTab.data.length > 0) {
+            return mapSignals(withTab.data);
+          }
+          // tab=recent returned empty — fall back to all signals for this table
+          const withoutTab = await fetchAllFromTable(table);
+          if (!withoutTab.error && withoutTab.data) {
+            return mapSignals(withoutTab.data);
+          }
+          break;
         }
 
         const code = (withTab.error as any)?.code;
-        const msg = (withTab.error as any)?.message || "";
 
         // Table doesn't exist — try the next one
         if (code === "PGRST205" || code === "42P01") continue;
 
-        // Column 'tab' doesn't exist — fall back to all signals for this table
-        if (code === "42703" || msg.includes("tab")) {
-          const withoutTab = await fortressClient
-            .from(table)
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(100);
-
-          if (!withoutTab.error && withoutTab.data) {
-            return mapSignals(withoutTab.data);
-          }
+        // Any other error (bad column, permission issue, etc.) — try without tab filter
+        const withoutTab = await fetchAllFromTable(table);
+        if (!withoutTab.error && withoutTab.data) {
+          return mapSignals(withoutTab.data);
         }
 
-        // Any other error — stop trying
         console.warn(`Error fetching signals from ${table}:`, withTab.error);
         break;
       }

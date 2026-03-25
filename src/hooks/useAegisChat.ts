@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { fortressClient } from "@/lib/fortress-client";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -42,12 +42,15 @@ export function useAegisChat() {
   const { toast } = useToast();
 
   // Derive operator directly from the already-resolved auth user
-  const operator: OperatorProfile | null = user
-    ? {
-        id: user.id,
-        name: user.user_metadata?.name ?? user.user_metadata?.full_name ?? null,
-      }
-    : null;
+  const operator: OperatorProfile | null = useMemo(() =>
+    user
+      ? {
+          id: user.id,
+          name: user.user_metadata?.name ?? user.user_metadata?.full_name ?? null,
+        }
+      : null,
+    [user]
+  );
 
   // Load conversations when auth resolves
   useEffect(() => {
