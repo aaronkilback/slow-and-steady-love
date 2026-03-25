@@ -70,12 +70,14 @@ async function tryFetchFromTables<T>(
       if (!error && data) {
         return data;
       }
-      // If table doesn't exist, try next
       const code = (error as any)?.code;
-      if (code && code !== "PGRST205" && code !== "42P01") {
-        console.warn(`Error fetching from ${table}:`, error.message);
-        break;
-      }
+      // Table doesn't exist — try next
+      if (!code || code === "PGRST205" || code === "42P01" || code === "PGRST116") continue;
+      // Column doesn't exist — try next (schema mismatch)
+      if (code === "42703" || code === "PGRST204") continue;
+      // Any other error — stop
+      console.warn(`Error fetching from ${table}:`, error.message);
+      break;
     } catch (e) {
       console.warn(`Exception fetching from ${table}:`, e);
     }
@@ -96,24 +98,29 @@ export function useFortressPlatformData(): FortressPlatformData {
     setError(null);
 
     try {
-      // Fetch signals - recent active signals
+      // Fetch signals - use select("*") to avoid column-name mismatches
       const signalsData = await tryFetchFromTables<Signal>(SIGNAL_TABLES, async (table) => {
-        // Try with "tab=recent" filter first
         const withTab = await fortressClient
           .from(table)
-          .select("id, type, priority, title, description, status, created_at")
+          .select("*")
           .eq("tab", "recent")
           .order("created_at", { ascending: false })
           .limit(20);
         if (!withTab.error && withTab.data && withTab.data.length > 0) return withTab;
-        // Fall back without tab filter if column doesn't exist
         return await fortressClient
           .from(table)
-          .select("id, type, priority, title, description, status, created_at")
+          .select("*")
           .order("created_at", { ascending: false })
           .limit(20);
       });
-      setSignals(signalsData);
+      // Normalize field names (Fortress may use severity/category instead of priority/type)
+      const normalizedSignals = signalsData.map((s: any) => ({
+        ...s,
+        type: s.type || s.category || s.signal_type || "general",
+        priority: s.priority || s.severity || "low",
+        status: s.status || "active",
+      }));
+      setSignals(normalizedSignals);
 
       // Fetch user locations with profiles
       const locationsData = await tryFetchFromTables<UserLocation>(LOCATION_TABLES, async (table) => {
@@ -126,24 +133,31 @@ export function useFortressPlatformData(): FortressPlatformData {
       });
       setLocations(locationsData);
 
-      // Fetch team profiles
-      const profilesData = await tryFetchFromTables<TeamProfile>(PROFILE_TABLES, async (table) => {
-        const result = await fortressClient
-          .from(table)
-          .select("id, name, full_name, avatar_url")
-          .limit(100);
-        return result;
+      // Fetch team profiles — select("*") to avoid full_name/name column mismatch
+      const profilesRaw = await tryFetchFromTables<any>(PROFILE_TABLES, async (table) => {
+        return await fortressClient.from(table).select("*").limit(100);
       });
+      const profilesData: TeamProfile[] = profilesRaw.map((p: any) => ({
+        id: p.id,
+        name: p.name || p.full_name || p.username || null,
+        full_name: p.full_name || p.name || null,
+        avatar_url: p.avatar_url || null,
+        role: p.role || null,
+        status: p.status || null,
+      }));
       setProfiles(profilesData);
 
-      // Fetch agents from agents table
-      const agentsData = await tryFetchFromTables<Agent>(AGENT_TABLES, async (table) => {
-        const result = await fortressClient
-          .from(table)
-          .select("id, name, type, role, status")
-          .limit(50);
-        return result;
+      // Fetch agents — select("*") to avoid column-name mismatches
+      const agentsRaw = await tryFetchFromTables<any>(AGENT_TABLES, async (table) => {
+        return await fortressClient.from(table).select("*").limit(50);
       });
+      const agentsData: Agent[] = agentsRaw.map((a: any) => ({
+        id: a.id,
+        name: a.name || a.agent_name || a.title || a.id,
+        type: a.type || a.agent_type || "ai",
+        role: a.role || a.description || null,
+        status: a.status || "online",
+      }));
 
       // Also discover agents from conversation titles
       const conversationAgents: Agent[] = [];

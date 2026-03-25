@@ -25,9 +25,11 @@ interface OperatorProfile {
 // Use Fortress edge function for AI chat (deployed to kpuqukppbmwebiptqmog)
 const AEGIS_CHAT_URL = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/aegis-chat`;
 
-// Fortress platform table names — shared with the main Fortress app
-const CONVERSATION_TABLE = "agent_conversations";
-const MESSAGE_TABLE = "agent_messages";
+// Fortress platform table names — try in order until one works
+const CONVERSATION_TABLES = ["agent_conversations", "aegis_conversations"] as const;
+const MESSAGE_TABLES = ["agent_messages", "aegis_messages"] as const;
+const CONVERSATION_TABLE = CONVERSATION_TABLES[0];
+const MESSAGE_TABLE = MESSAGE_TABLES[0];
 
 export function useAegisChat() {
   const { user } = useAuth();
@@ -70,32 +72,35 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
-    // Do not filter by user_id — Fortress RLS handles per-user scoping
-    const { data, error } = await fortressClient
-      .from(CONVERSATION_TABLE)
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(50);
+    for (const table of CONVERSATION_TABLES) {
+      const { data, error } = await fortressClient
+        .from(table)
+        .select("*")
+        .order("updated_at", { ascending: false })
+        .limit(50);
 
-    console.log("[Aegis] loadConversations →", { table: CONVERSATION_TABLE, data, error });
+      console.log("[Aegis] loadConversations →", { table, data, error });
 
-    if (!error && data) {
-      setConversations(
-        data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
-      );
-      if (data.length > 0 && !currentConversationId) {
-        setCurrentConversationId(data[0].id);
+      if (!error && data) {
+        setConversations(
+          data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
+        );
+        if (data.length > 0 && !currentConversationId) {
+          setCurrentConversationId(data[0].id);
+        }
+        return;
       }
-      return;
-    }
 
-    if (error) {
-      console.warn("Failed to load conversations:", error.message);
+      const code = (error as any)?.code;
+      if (code === "PGRST205" || code === "42P01" || code === "PGRST116") continue;
+
+      console.warn("Failed to load conversations:", error?.message);
       toast({
         variant: "destructive",
         title: "Could not load chat history",
-        description: error.message,
+        description: error?.message,
       });
+      break;
     }
     setConversations([]);
   };
@@ -103,15 +108,22 @@ export function useAegisChat() {
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    const { data, error } = await fortressClient
-      .from(MESSAGE_TABLE)
-      .select("*")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
+    let data: any[] | null = null;
+    for (const table of MESSAGE_TABLES) {
+      const result = await fortressClient
+        .from(table)
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
 
-    console.log("[Aegis] loadMessages →", { table: MESSAGE_TABLE, conversationId, data, error });
+      console.log("[Aegis] loadMessages →", { table, conversationId, data: result.data, error: result.error });
 
-    if (!error && data) {
+      if (!result.error && result.data) { data = result.data; break; }
+      const code = (result.error as any)?.code;
+      if (code !== "PGRST205" && code !== "42P01" && code !== "PGRST116") break;
+    }
+
+    if (data) {
       setMessages(
         data.map((m: any) => ({
           ...m,
@@ -119,7 +131,6 @@ export function useAegisChat() {
         }))
       );
     } else {
-      if (error) console.warn("Failed to load messages:", error.message);
       setMessages([]);
     }
     setIsLoading(false);
