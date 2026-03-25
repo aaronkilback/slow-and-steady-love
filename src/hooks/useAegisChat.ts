@@ -21,8 +21,8 @@ interface OperatorProfile {
   avatar_url?: string | null;
 }
 
-// Use the local Supabase edge function for AI chat
-const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
+// Use Fortress edge function for AI chat (deployed to kpuqukppbmwebiptqmog)
+const AEGIS_CHAT_URL = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/aegis-chat`;
 
 // Table names — stored in Fortress so history is shared across devices
 const CONVERSATION_TABLE = "aegis_conversations";

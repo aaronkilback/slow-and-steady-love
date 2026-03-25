@@ -97,7 +97,7 @@ export function BreachChecker() {
       }
 
       const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wraith-breach-check`,
+        `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/wraith-breach-check`,
         {
           method: "POST",
           headers: {
