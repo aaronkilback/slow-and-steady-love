@@ -45,18 +45,26 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3MB limit
+        // Only precache static assets (icons, fonts) — NOT JS/CSS bundles.
+        // JS/CSS are hashed per-build so they're always fresh from network.
+        globPatterns: ["**/*.{ico,png,svg,woff2}"],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        // JS/CSS/HTML: network first, fall back to cache
         runtimeCaching: [
+          {
+            urlPattern: /\.(?:js|css)$/i,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "app-bundles",
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 },
+            },
+          },
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: "NetworkFirst",
             options: {
               cacheName: "supabase-cache",
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 24 hours
-              },
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
             },
           },
         ],
