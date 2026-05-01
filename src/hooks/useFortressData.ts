@@ -126,11 +126,10 @@ export function isRecentSignal(s: any): boolean {
   // Mobile is for actionable signals, not informational reading.
   // Severity 'low' is reserved on Fortress for community outreach,
   // routine politics, distant geopolitical content — none of it
-  // demands an operator open the app. Same applies to weak-signal
-  // rows where quality_score didn't clear the actionability bar.
+  // demands an operator open the app. The existing isQuestionable
+  // check already drops sub-0.4 quality rows.
   const sev = (s.severity || "").toLowerCase();
   if (sev === "low") return false;
-  if (typeof s.quality_score === "number" && s.quality_score < 0.7) return false;
   if (isAutoHidden(s)) return false;
   if (isCyberAdvisory(s)) return false;
 
