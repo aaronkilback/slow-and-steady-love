@@ -82,8 +82,10 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   // mentionedAgent = the agent the operator selected from the list, the
   // one we'll route the message to.
   const [mentionStart, setMentionStart] = useState<number>(-1);
-  const [mentionedAgent, setMentionedAgent] = useState<MentionableAgent | null>(null);
-  const [isAgentResponding, setIsAgentResponding] = useState(false);
+  // Multiple agents can be addressed in a single message. The send
+  // handler fires respond-as-agent once per agent in this list.
+  const [mentionedAgents, setMentionedAgents] = useState<MentionableAgent[]>([]);
+  const [pendingAgentResponses, setPendingAgentResponses] = useState(0);
   const mentionRef = useRef<AgentMentionTypeaheadHandle>(null);
   const { data: fortressAgents = [] } = useAgents();
   const mentionableAgents: MentionableAgent[] = fortressAgents.map((a: any) => ({
@@ -444,7 +446,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       let messageContent = newMessage.trim();
       let messageNonce: string | null = null;
       let isEncrypted = false;
-      const isAgentQuery = !!mentionedAgent;
+      const isAgentQuery = mentionedAgents.length > 0;
 
       // Agent-targeted messages skip encryption: the agent runs server-
       // side and needs plaintext to read. UI flags them so operators
@@ -487,7 +489,10 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         encrypted: isEncrypted,
         nonce: messageNonce,
         is_agent_query: isAgentQuery,
-        mentioned_agent_id: mentionedAgent?.id ?? null,
+        // The schema column is single-valued — store the first mentioned
+        // agent here for audit. The dispatch loop below fans out to every
+        // agent in mentionedAgents.
+        mentioned_agent_id: mentionedAgents[0]?.id ?? null,
       };
 
       const { data: insertedMsg, error } = await supabase
@@ -505,40 +510,43 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       } else {
         setNewMessage("");
         setAttachments([]);
-        const targetAgent = mentionedAgent;
-        setMentionedAgent(null);
+        const targets = mentionedAgents;
+        setMentionedAgents([]);
         setMentionStart(-1);
 
-        // Fire the agent response in the background so the UI doesn't
-        // block on the LLM call. Realtime subscription will pick up
-        // the agent's reply when it lands.
-        if (targetAgent && insertedMsg?.id) {
-          setIsAgentResponding(true);
-          (async () => {
-            try {
-              const { data: { session } } = await fortressClient.auth.getSession();
-              const token = session?.access_token;
-              if (!token) return;
-              await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/respond-as-agent`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({
-                    conversation_id: conversationId,
-                    message_id: insertedMsg.id,
-                  }),
-                }
-              );
-            } catch (e) {
-              console.warn("[ConversationView] agent response failed:", e);
-            } finally {
-              setIsAgentResponding(false);
-            }
-          })();
+        // Fan out one respond-as-agent call per addressed agent. Each
+        // gets its own fresh request so they respond in parallel and
+        // can land in any order. Realtime subscription picks each up.
+        if (targets.length > 0 && insertedMsg?.id) {
+          setPendingAgentResponses(targets.length);
+          const { data: { session } } = await fortressClient.auth.getSession();
+          const token = session?.access_token;
+          targets.forEach((agent) => {
+            (async () => {
+              try {
+                if (!token) return;
+                await fetch(
+                  `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/respond-as-agent`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                      conversation_id: conversationId,
+                      message_id: insertedMsg.id,
+                      agent_id_override: agent.id,
+                    }),
+                  }
+                );
+              } catch (e) {
+                console.warn(`[ConversationView] ${agent.call_sign} response failed:`, e);
+              } finally {
+                setPendingAgentResponses((n) => Math.max(0, n - 1));
+              }
+            })();
+          });
         }
       }
     } catch (err) {
@@ -824,30 +832,57 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             <AgentMentionTypeahead
               ref={mentionRef}
               query={newMessage.slice(mentionStart + 1)}
-              agents={mentionableAgents}
+              agents={mentionableAgents.filter(
+                (a) => !mentionedAgents.some((m) => m.id === a.id)
+              )}
               onSelect={(agent) => {
-                // Replace `@<typedQuery>` with `@CALL-SIGN ` and remember the agent
+                // Replace `@<typedQuery>` with `@CALL-SIGN ` and append the
+                // agent to the targeted list (multiple allowed).
                 const before = newMessage.slice(0, mentionStart);
                 const after = newMessage.slice(mentionStart + 1).replace(/^\S*/, "");
                 const next = `${before}@${agent.call_sign} ${after.trimStart()}`;
                 setNewMessage(next);
-                setMentionedAgent(agent);
+                setMentionedAgents((prev) =>
+                  prev.some((p) => p.id === agent.id) ? prev : [...prev, agent]
+                );
                 setMentionStart(-1);
               }}
               onClose={() => setMentionStart(-1)}
             />
           )}
-          {mentionedAgent && mentionStart < 0 && (
-            <div className="mb-2 flex items-center gap-2 text-xs text-primary">
-              <Bot className="h-3.5 w-3.5" />
-              <span>
-                Asking <strong>{mentionedAgent.call_sign}</strong> ·{" "}
-                {mentionedAgent.short_specialty}
+          {mentionedAgents.length > 0 && mentionStart < 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <Bot className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="text-primary mr-1">
+                Asking {mentionedAgents.length === 1 ? "agent" : `${mentionedAgents.length} agents`}:
               </span>
+              {mentionedAgents.map((agent) => (
+                <span
+                  key={agent.id}
+                  className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-primary"
+                >
+                  {agent.call_sign}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMentionedAgents((prev) => prev.filter((p) => p.id !== agent.id));
+                      setNewMessage((prev) =>
+                        prev
+                          .replace(new RegExp(`@${agent.call_sign}\\s*`, "g"), "")
+                          .replace(/\s{2,}/g, " ")
+                      );
+                    }}
+                    className="text-primary/70 hover:text-primary"
+                    aria-label={`Remove ${agent.call_sign}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
               <button
                 onClick={() => {
-                  setMentionedAgent(null);
-                  setNewMessage(newMessage.replace(/@\S+\s*/, ""));
+                  setMentionedAgents([]);
+                  setNewMessage((prev) => prev.replace(/@\S+\s*/g, "").trim());
                 }}
                 className="ml-auto text-muted-foreground hover:text-foreground"
               >
@@ -855,10 +890,12 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
               </button>
             </div>
           )}
-          {isAgentResponding && (
+          {pendingAgentResponses > 0 && (
             <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Agent is composing a response...
+              {pendingAgentResponses === 1
+                ? "Agent is composing a response..."
+                : `${pendingAgentResponses} agents are composing responses...`}
             </div>
           )}
           <div className="flex items-center gap-2">
@@ -887,9 +924,15 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                 } else {
                   setMentionStart(-1);
                 }
-                // If the operator has cleared the @mention text, drop the agent
-                if (mentionedAgent && !v.includes(`@${mentionedAgent.call_sign}`)) {
-                  setMentionedAgent(null);
+                // Drop any tracked agents whose `@CALL-SIGN` was edited out
+                // of the message text. Keeps state and visible tokens in sync.
+                if (mentionedAgents.length > 0) {
+                  const stillReferenced = mentionedAgents.filter((a) =>
+                    v.includes(`@${a.call_sign}`)
+                  );
+                  if (stillReferenced.length !== mentionedAgents.length) {
+                    setMentionedAgents(stillReferenced);
+                  }
                 }
               }}
               onKeyDown={handleKeyPress}
