@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,79 +16,129 @@ interface AgentMentionTypeaheadProps {
   onClose: () => void;
 }
 
+export interface AgentMentionTypeaheadHandle {
+  /** Called from the input's onKeyDown — returns true if the key was consumed. */
+  handleKey: (e: React.KeyboardEvent) => boolean;
+}
+
 /**
  * Floating list shown above the message input when the operator types
  * `@` in a conversation. Each row: bot icon, call_sign, 1-2 word
  * specialty. Filters as the operator continues typing. Returns the
  * selected agent's UUID (which is the Fortress ai_agents.id) so the
  * mention is unambiguous on the wire.
+ *
+ * Supports keyboard navigation when the parent forwards key events
+ * via the imperative `handleKey` API:
+ *   ArrowUp / ArrowDown — move highlight
+ *   Enter / Tab          — select highlighted agent
+ *   Escape               — close popover
  */
-export function AgentMentionTypeahead({
-  query,
-  agents,
-  onSelect,
-  onClose,
-}: AgentMentionTypeaheadProps) {
-  const listRef = useRef<HTMLDivElement>(null);
+export const AgentMentionTypeahead = forwardRef<AgentMentionTypeaheadHandle, AgentMentionTypeaheadProps>(
+  function AgentMentionTypeahead({ query, agents, onSelect, onClose }, ref) {
+    const listRef = useRef<HTMLDivElement>(null);
+    const [highlight, setHighlight] = useState(0);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return agents.slice(0, 8);
-    return agents
-      .filter(
-        (a) =>
-          a.call_sign.toLowerCase().includes(q) ||
-          a.short_specialty.toLowerCase().includes(q)
-      )
-      .slice(0, 8);
-  }, [query, agents]);
+    const filtered = useMemo(() => {
+      const q = query.trim().toLowerCase();
+      if (!q) return agents.slice(0, 8);
+      return agents
+        .filter(
+          (a) =>
+            a.call_sign.toLowerCase().includes(q) ||
+            a.short_specialty.toLowerCase().includes(q)
+        )
+        .slice(0, 8);
+    }, [query, agents]);
 
-  // Close when clicking outside
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (!listRef.current) return;
-      if (!listRef.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+    // Reset highlight when filter changes
+    useEffect(() => {
+      setHighlight(0);
+    }, [query]);
 
-  if (filtered.length === 0) return null;
+    // Close on outside click
+    useEffect(() => {
+      function handler(e: MouseEvent) {
+        if (!listRef.current) return;
+        if (!listRef.current.contains(e.target as Node)) onClose();
+      }
+      document.addEventListener("mousedown", handler);
+      return () => document.removeEventListener("mousedown", handler);
+    }, [onClose]);
 
-  return (
-    <div
-      ref={listRef}
-      className={cn(
-        "absolute bottom-full mb-2 left-4 right-4 z-50",
-        "rounded-lg border border-border bg-card shadow-lg overflow-hidden"
-      )}
-    >
-      <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border bg-card/60">
-        Mention an agent
-      </div>
-      <div className="max-h-56 overflow-y-auto">
-        {filtered.map((agent) => (
-          <button
-            key={agent.id}
-            onClick={() => onSelect(agent)}
-            className="w-full px-3 py-2 flex items-center gap-3 hover:bg-accent/40 transition-colors text-left"
-            type="button"
-          >
-            <div className="h-8 w-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
-              <Bot className="h-4 w-4 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm truncate">{agent.call_sign}</div>
-              <div className="text-[11px] text-muted-foreground truncate">
-                {agent.short_specialty}
+    useImperativeHandle(
+      ref,
+      () => ({
+        handleKey: (e: React.KeyboardEvent) => {
+          if (filtered.length === 0) return false;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlight((h) => (h + 1) % filtered.length);
+            return true;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlight((h) => (h - 1 + filtered.length) % filtered.length);
+            return true;
+          }
+          if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault();
+            onSelect(filtered[highlight]);
+            return true;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+            return true;
+          }
+          return false;
+        },
+      }),
+      [filtered, highlight, onSelect, onClose]
+    );
+
+    if (filtered.length === 0) return null;
+
+    return (
+      <div
+        ref={listRef}
+        className={cn(
+          "absolute bottom-full mb-2 left-4 right-4 z-50",
+          "rounded-lg border border-border bg-card shadow-lg overflow-hidden"
+        )}
+      >
+        <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border bg-card/60 flex items-center justify-between">
+          <span>Mention an agent</span>
+          <span className="text-[10px] normal-case tracking-normal opacity-60">↑↓ Enter</span>
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          {filtered.map((agent, i) => (
+            <button
+              key={agent.id}
+              onClick={() => onSelect(agent)}
+              onMouseEnter={() => setHighlight(i)}
+              className={cn(
+                "w-full px-3 py-2 flex items-center gap-3 transition-colors text-left",
+                i === highlight ? "bg-accent/60" : "hover:bg-accent/40"
+              )}
+              type="button"
+            >
+              <div className="h-8 w-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                <Bot className="h-4 w-4 text-primary" />
               </div>
-            </div>
-          </button>
-        ))}
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm truncate">{agent.call_sign}</div>
+                <div className="text-[11px] text-muted-foreground truncate">
+                  {agent.short_specialty}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
 
 /**
  * Compact a Fortress agent specialty string into 1-2 words for display

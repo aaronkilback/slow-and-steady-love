@@ -19,8 +19,14 @@ import { EncryptionStatus } from "@/components/encryption/EncryptionStatus";
 import { EncryptionSetup } from "@/components/encryption/EncryptionSetup";
 import { EncryptionUnlock } from "@/components/encryption/EncryptionUnlock";
 import { AddOperatorsDialog } from "./AddOperatorsDialog";
-import { AgentMentionTypeahead, shortenSpecialty, type MentionableAgent } from "./AgentMentionTypeahead";
+import {
+  AgentMentionTypeahead,
+  shortenSpecialty,
+  type MentionableAgent,
+  type AgentMentionTypeaheadHandle,
+} from "./AgentMentionTypeahead";
 import { useAgents } from "@/hooks/useFortressData";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   id: string;
@@ -78,6 +84,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [mentionStart, setMentionStart] = useState<number>(-1);
   const [mentionedAgent, setMentionedAgent] = useState<MentionableAgent | null>(null);
   const [isAgentResponding, setIsAgentResponding] = useState(false);
+  const mentionRef = useRef<AgentMentionTypeaheadHandle>(null);
   const { data: fortressAgents = [] } = useAgents();
   const mentionableAgents: MentionableAgent[] = fortressAgents.map((a: any) => ({
     id: a.id,
@@ -547,6 +554,11 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
+    // When the agent mention popover is open, let it consume arrow /
+    // Enter / Tab / Escape first.
+    if (mentionStart >= 0 && mentionRef.current) {
+      if (mentionRef.current.handleKey(e)) return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -729,9 +741,20 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                           
                           {hasContent && (
                             <div className="flex items-start gap-1">
-                              <p className="text-sm whitespace-pre-wrap flex-1">
-                                {message.encrypted ? (message.decryptedContent || message.content) : message.content}
-                              </p>
+                              {isAgent ? (
+                                // Agent responses use markdown — they emit
+                                // bullets, bold call-outs, and the occasional
+                                // link. Keep prose tight for chat density.
+                                <div className="text-sm flex-1 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:mt-2 prose-headings:mb-1">
+                                  <ReactMarkdown>
+                                    {message.decryptedContent || message.content}
+                                  </ReactMarkdown>
+                                </div>
+                              ) : (
+                                <p className="text-sm whitespace-pre-wrap flex-1">
+                                  {message.encrypted ? (message.decryptedContent || message.content) : message.content}
+                                </p>
+                              )}
                               {message.encrypted && (
                                 <Shield className="h-3 w-3 text-emerald-500 shrink-0 mt-0.5" />
                               )}
@@ -799,6 +822,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         <div className="relative border-t border-border bg-card/50 p-4">
           {mentionStart >= 0 && (
             <AgentMentionTypeahead
+              ref={mentionRef}
               query={newMessage.slice(mentionStart + 1)}
               agents={mentionableAgents}
               onSelect={(agent) => {
