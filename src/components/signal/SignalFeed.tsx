@@ -195,7 +195,9 @@ export function SignalFeed() {
     }
   }, [signals]);
 
-  // Subscribe to realtime updates
+  // Subscribe to realtime updates — apply the same Recent filter the
+  // initial fetch uses, so historical / archived / soft-deleted signals
+  // never push into the feed via INSERT events.
   useEffect(() => {
     const channel = fortressClient
       .channel("signals-realtime")
@@ -207,7 +209,12 @@ export function SignalFeed() {
           table: "signals",
         },
         (payload) => {
-          setLocalSignals((prev) => [payload.new as SignalType, ...prev]);
+          const s: any = payload.new;
+          if (s.deleted_at) return;
+          if (s.status === "archived" || s.status === "false_positive") return;
+          if (s.triage_override === "historical") return;
+          if (s.signal_type === "historical") return;
+          setLocalSignals((prev) => [s as SignalType, ...prev]);
         }
       )
       .subscribe();

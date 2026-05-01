@@ -70,35 +70,34 @@ export function useSignals() {
       //   - not analyst-archived or false-positive
       //   - not flagged historical (triage_override / signal_type)
       //   - within the last 90 days
-      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      //
+      // Filtering happens client-side after fetching the most recent 200.
+      // Two chained .or() calls don't AND reliably through PostgREST and
+      // server-side filters silently dropped earlier — keeping it in JS
+      // makes the rules unambiguous and easy to evolve.
+      const ninetyDaysAgoMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
 
       for (const table of SIGNAL_TABLES) {
         const { data, error } = await fortressClient
           .from(table)
           .select("*")
-          .is("deleted_at", null)
-          .not("status", "in", "(archived,false_positive)")
-          .or("triage_override.is.null,triage_override.neq.historical")
-          .or("signal_type.is.null,signal_type.neq.historical")
-          .gte("created_at", ninetyDaysAgo)
           .order("created_at", { ascending: false })
-          .limit(100);
+          .limit(200);
 
-        if (!error && data) return mapSignals(data);
+        if (!error && data) {
+          const recent = data.filter((s: any) => {
+            if (s.deleted_at) return false;
+            if (s.status === "archived" || s.status === "false_positive") return false;
+            if (s.triage_override === "historical") return false;
+            if (s.signal_type === "historical") return false;
+            if (new Date(s.created_at).getTime() < ninetyDaysAgoMs) return false;
+            return true;
+          });
+          return mapSignals(recent).slice(0, 100);
+        }
 
         const code = (error as any)?.code;
         if (code === "PGRST205" || code === "42P01") continue;
-
-        // Some columns (deleted_at, triage_override, signal_type) may not
-        // exist on older deployments — fall back to plain ordered query.
-        if (code === "42703") {
-          const fallback = await fortressClient
-            .from(table)
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(100);
-          if (!fallback.error && fallback.data) return mapSignals(fallback.data);
-        }
 
         console.warn(`Error fetching signals from ${table}:`, error);
         break;
