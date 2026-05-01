@@ -624,7 +624,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
 
   return (
     <>
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full min-h-0">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-3">
           <div className="flex items-center gap-3">
@@ -686,7 +686,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         </AnimatePresence>
 
         {/* Messages */}
-        <ScrollArea ref={scrollRef} className="flex-1 px-4 py-4">
+        <ScrollArea ref={scrollRef} className="flex-1 min-h-0 px-4 py-4">
           <div className="space-y-4 pb-4">
             {isLoading ? (
               <div className="flex justify-center py-8">
