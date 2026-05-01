@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageCircle, Megaphone, Search, User, Users } from "lucide-react";
+import { MessageCircle, Megaphone, Search, User, Users, Bot, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -36,6 +36,29 @@ export function MessagingHub() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [showNewConversation, setShowNewConversation] = useState(false);
+  const [creatingSoloDesk, setCreatingSoloDesk] = useState(false);
+
+  // "Solo intel desk" — a conversation with just the current operator,
+  // intended as a private workspace where they can @-mention agents
+  // and consult them without needing other humans on the team yet.
+  const startSoloDesk = async () => {
+    if (creatingSoloDesk) return;
+    setCreatingSoloDesk(true);
+    try {
+      const { data: newConvId, error } = await supabase.rpc(
+        "create_conversation_with_participant",
+        { _name: "Personal Intel Desk", _is_group: false }
+      );
+      if (error || !newConvId) {
+        console.error("[MessagingHub] solo desk create failed:", error);
+        return;
+      }
+      setSelectedConversation(newConvId as unknown as string);
+      loadConversations();
+    } finally {
+      setCreatingSoloDesk(false);
+    }
+  };
 
   useEffect(() => {
     loadConversations();
@@ -158,7 +181,7 @@ export function MessagingHub() {
           <ScrollArea className="h-[calc(100vh-16rem)]">
             <div className="space-y-2 pb-4">
               {/* New conversation button */}
-              <Card 
+              <Card
                 className="p-3 cursor-pointer border-dashed border-primary/50 hover:bg-primary/5 transition-colors"
                 onClick={() => setShowNewConversation(true)}
               >
@@ -169,6 +192,28 @@ export function MessagingHub() {
                   <div>
                     <p className="font-medium text-primary">New Conversation</p>
                     <p className="text-xs text-muted-foreground">Start a chat with another operator</p>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Solo intel desk — agents only, no other humans needed */}
+              <Card
+                className="p-3 cursor-pointer border-dashed border-primary/30 hover:bg-primary/5 transition-colors"
+                onClick={startSoloDesk}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                    {creatingSoloDesk ? (
+                      <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                    ) : (
+                      <Bot className="h-5 w-5 text-primary" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-primary">Solo intel desk</p>
+                    <p className="text-xs text-muted-foreground">
+                      Private workspace — @-mention agents to consult them
+                    </p>
                   </div>
                 </div>
               </Card>
