@@ -1,8 +1,8 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { fortressClient } from "@/lib/fortress-client";
 import { toast } from "sonner";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export interface TravelItinerary {
   id: string;
@@ -53,13 +53,22 @@ export interface TravelAlert {
 
 export function useTravelItineraries() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   const { data: itineraries = [], isLoading, error, refetch } = useQuery({
-    queryKey: ["travel-itineraries"],
+    queryKey: ["travel-itineraries", userId],
+    enabled: !!userId,
     queryFn: async () => {
+      // Travel rows live on this project's Supabase but auth lives on
+      // Fortress, so we cannot rely on auth.uid() in RLS — scope by the
+      // resolved Fortress user_id explicitly. RLS is "allow all" on
+      // these tables; this filter is what actually keeps users from
+      // seeing each other's itineraries.
       const { data, error } = await supabase
         .from("travel_itineraries")
         .select("*")
+        .eq("user_id", userId!)
         .order("departure_date", { ascending: true });
 
       if (error) throw error;
@@ -75,13 +84,12 @@ export function useTravelItineraries() {
       return_date?: string;
       notes?: string;
     }) => {
-      const { data: { user } } = await fortressClient.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      if (!userId) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
         .from("travel_itineraries")
         .insert({
-          user_id: user.id,
+          user_id: userId,
           ...params,
         })
         .select()
@@ -146,13 +154,17 @@ export function useTravelItineraries() {
 
 export function useTravelFlights(itineraryId?: string) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   const { data: flights = [], isLoading, error, refetch } = useQuery({
-    queryKey: ["travel-flights", itineraryId],
+    queryKey: ["travel-flights", userId, itineraryId],
+    enabled: !!userId,
     queryFn: async () => {
       let query = supabase
         .from("travel_flights")
         .select("*")
+        .eq("user_id", userId!)
         .order("departure_time", { ascending: true });
 
       if (itineraryId) {
@@ -176,13 +188,12 @@ export function useTravelFlights(itineraryId?: string) {
       arrival_time?: string;
       itinerary_id?: string;
     }) => {
-      const { data: { user } } = await fortressClient.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      if (!userId) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
         .from("travel_flights")
         .insert({
-          user_id: user.id,
+          user_id: userId,
           ...params,
         })
         .select()
@@ -257,13 +268,17 @@ export function useTravelFlights(itineraryId?: string) {
 
 export function useTravelAlerts() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
   const { data: alerts = [], isLoading, error, refetch } = useQuery({
-    queryKey: ["travel-alerts"],
+    queryKey: ["travel-alerts", userId],
+    enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("travel_alerts")
         .select("*")
+        .eq("user_id", userId!)
         .order("created_at", { ascending: false });
 
       if (error) throw error;

@@ -18,14 +18,17 @@ const statusConfig: Record<AgentStatus, { label: string; color: string; dotColor
   offline: { label: "Offline", color: "text-muted-foreground", dotColor: "bg-muted-foreground" },
 };
 
-// Default AI agents that are always present in Aegis
+// Default AI agents that are always present in Aegis. Each card surfaces:
+//   - persona  → how the agent talks / what role it plays in the team
+//   - specialty → the domain expertise it owns (anchors operator trust)
 const defaultAiAgents: Agent[] = [
   {
     id: "aegis",
     name: "Aegis",
     type: "ai",
     role: "Lead Intelligence Agent",
-    description: "Primary AI coordinator for threat analysis, system monitoring, and command orchestration",
+    description: "Calm, tactical command-post AI. Synthesizes inputs from every other agent, briefs operators, and coordinates response.",
+    specialty: "Multi-agent orchestration, intelligence synthesis, command-post operations, and crisis coordination.",
     status: "online",
     capabilities: ["Threat Analysis", "Agent Coordination", "Intelligence Briefings", "System Monitoring"],
   },
@@ -34,7 +37,8 @@ const defaultAiAgents: Agent[] = [
     name: "Sentinel",
     type: "ai",
     role: "Perimeter Defense Agent",
-    description: "Monitors network boundaries and detects intrusion attempts in real-time",
+    description: "Vigilant and methodical. Treats every anomaly as a potential intrusion until cleared.",
+    specialty: "Network perimeter defense, intrusion detection, firewall posture, and access-control review.",
     status: "online",
     capabilities: ["Firewall Management", "Intrusion Detection", "Access Control", "Traffic Analysis"],
   },
@@ -43,7 +47,8 @@ const defaultAiAgents: Agent[] = [
     name: "OSINT Hunter",
     type: "ai",
     role: "Open Source Intelligence Agent",
-    description: "Gathers and analyzes publicly available intelligence from multiple sources",
+    description: "Patient and persistent investigator. Surfaces what's public before adversaries weaponize it.",
+    specialty: "Dark-web monitoring, social-engineering detection, brand exposure, and adversary-attribution research.",
     status: "online",
     capabilities: ["Threat Intelligence", "Dark Web Monitoring", "Social Engineering Detection", "Brand Monitoring"],
   },
@@ -52,9 +57,20 @@ const defaultAiAgents: Agent[] = [
     name: "Monitor",
     type: "ai",
     role: "Network Analysis Agent",
-    description: "Continuous surveillance of internal network traffic and endpoint behavior",
+    description: "Quiet, baseline-aware observer. Flags deviations without crying wolf.",
+    specialty: "Internal traffic baselining, anomaly detection, endpoint behavior, and data-loss prevention.",
     status: "online",
     capabilities: ["Traffic Analysis", "Anomaly Detection", "Endpoint Monitoring", "Data Loss Prevention"],
+  },
+  {
+    id: "wraith",
+    name: "Wraith",
+    type: "ai",
+    role: "Threat Hunter",
+    description: "Adversarial mindset. Looks for what's already inside that nobody else has seen yet.",
+    specialty: "Credential-leak triage, breach exposure checking, vulnerability assessment, and stealth-threat hunting.",
+    status: "online",
+    capabilities: ["Breach Checking", "Vulnerability Assessment", "Threat Hunting", "Credential Monitoring"],
   },
 ];
 
@@ -108,6 +124,12 @@ function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => 
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
               {agent.description}
             </p>
+            {agent.specialty && (
+              <p className="text-xs text-foreground/80 mt-1 line-clamp-2">
+                <span className="font-medium text-muted-foreground">Specialty:</span>{" "}
+                {agent.specialty}
+              </p>
+            )}
 
             <div className="flex flex-wrap gap-1 mt-2">
               {agent.capabilities.slice(0, 3).map((cap) => (

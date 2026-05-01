@@ -24,7 +24,10 @@ export interface Agent {
   name: string;
   type: "ai" | "human";
   role: string;
+  /** One-sentence persona / how the agent communicates. */
   description: string;
+  /** Domain expertise — what this agent is the specialist for. */
+  specialty?: string;
   status: "online" | "busy" | "offline";
   capabilities: string[];
   avatar_url?: string;
@@ -44,7 +47,7 @@ export function useSignals() {
     queryFn: async () => {
       // Try multiple table names for cross-platform compatibility
       const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
-      
+
       const mapSignals = (data: any[]): Signal[] =>
         data.map((signal: any) => ({
           id: signal.id,
@@ -62,10 +65,22 @@ export function useSignals() {
           raw: signal,
         }));
 
+      // "Recent" mirrors the Fortress webapp's Recent tab on /signals:
+      //   - not soft-deleted
+      //   - not analyst-archived or false-positive
+      //   - not flagged historical (triage_override / signal_type)
+      //   - within the last 90 days
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
       for (const table of SIGNAL_TABLES) {
         const { data, error } = await fortressClient
           .from(table)
           .select("*")
+          .is("deleted_at", null)
+          .not("status", "in", "(archived,false_positive)")
+          .or("triage_override.is.null,triage_override.neq.historical")
+          .or("signal_type.is.null,signal_type.neq.historical")
+          .gte("created_at", ninetyDaysAgo)
           .order("created_at", { ascending: false })
           .limit(100);
 
@@ -73,6 +88,17 @@ export function useSignals() {
 
         const code = (error as any)?.code;
         if (code === "PGRST205" || code === "42P01") continue;
+
+        // Some columns (deleted_at, triage_override, signal_type) may not
+        // exist on older deployments — fall back to plain ordered query.
+        if (code === "42703") {
+          const fallback = await fortressClient
+            .from(table)
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(100);
+          if (!fallback.error && fallback.data) return mapSignals(fallback.data);
+        }
 
         console.warn(`Error fetching signals from ${table}:`, error);
         break;
@@ -89,18 +115,35 @@ export function useAgents() {
   return useQuery({
     queryKey: ["fortress-agents"],
     queryFn: async () => {
-      // Fetch AI agents from agents table
+      // Fortress stores agents in ai_agents (not "agents") with rich
+      // persona / specialty / call_sign fields. Map them onto the
+      // mobile Agent shape so the directory cards can show real
+      // persona + specialty straight from Fortress.
       const { data, error } = await fortressClient
-        .from("agents")
-        .select("*")
-        .order("name", { ascending: true });
+        .from("ai_agents")
+        .select("id, codename, call_sign, persona, specialty, mission_scope, avatar_color, is_active")
+        .eq("is_active", true)
+        .order("call_sign", { ascending: true });
 
       if (error) {
-        console.error("Error fetching agents:", error);
+        const code = (error as any)?.code;
+        // Older deployments may not have ai_agents — silently fall back
+        // to whatever defaults are merged in by AgentDirectory.
+        if (code === "PGRST205" || code === "42P01") return [];
+        console.error("Error fetching ai_agents:", error);
         return [];
       }
 
-      return (data || []) as Agent[];
+      return (data ?? []).map((row: any): Agent => ({
+        id: row.id,
+        name: row.call_sign || row.codename || "Agent",
+        type: "ai",
+        role: row.codename || "AI Agent",
+        description: row.persona || "",
+        specialty: row.specialty || row.mission_scope || undefined,
+        status: "online",
+        capabilities: [],
+      }));
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
   });

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { fortressClient } from "@/lib/fortress-client";
+import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -22,25 +23,15 @@ interface OperatorProfile {
   avatar_url?: string | null;
 }
 
-// Use Fortress edge function for AI chat (deployed to kpuqukppbmwebiptqmog)
-const AEGIS_CHAT_URL = `https://kpuqukppbmwebiptqmog.supabase.co/functions/v1/aegis-chat`;
+// AEGIS chat lives on this project's own Supabase (aegis-chat function +
+// aegis_conversations / aegis_messages tables). The Fortress platform
+// project does NOT have an aegis-chat edge function — pointing the URL
+// there returned 404 and broke every chat call.
+const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
-// Fortress platform table names — try in order until one works
-const CONVERSATION_TABLES = [
-  "agent_conversations",
-  "aegis_conversations",
-  "conversations",
-  "chat_sessions",
-  "chats",
-] as const;
-const MESSAGE_TABLES = [
-  "agent_messages",
-  "aegis_messages",
-  "messages",
-  "chat_messages",
-] as const;
-const CONVERSATION_TABLE = CONVERSATION_TABLES[0];
-const MESSAGE_TABLE = MESSAGE_TABLES[0];
+// Tables on this project's Supabase
+const CONVERSATION_TABLE = "aegis_conversations";
+const MESSAGE_TABLE = "aegis_messages";
 
 export function useAegisChat() {
   const { user } = useAuth();
@@ -83,56 +74,42 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
-    for (const table of CONVERSATION_TABLES) {
-      const { data, error } = await fortressClient
-        .from(table)
-        .select("*")
-        .order("updated_at", { ascending: false })
-        .limit(50);
+    const { data, error } = await supabase
+      .from(CONVERSATION_TABLE)
+      .select("id, title, updated_at")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(50);
 
-
-      if (!error && data) {
-        setConversations(
-          data.map((c: any) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
-        );
-        if (data.length > 0 && !currentConversationId) {
-          setCurrentConversationId(data[0].id);
-        }
-        return;
-      }
-
-      const code = (error as any)?.code;
-      if (code === "PGRST205" || code === "42P01" || code === "PGRST116") continue;
-
-      console.warn("Failed to load conversations:", error?.message);
+    if (error) {
+      console.warn("Failed to load conversations:", error.message);
       toast({
         variant: "destructive",
         title: "Could not load chat history",
-        description: error?.message,
+        description: error.message,
       });
-      break;
+      setConversations([]);
+      return;
     }
-    setConversations([]);
+
+    setConversations(
+      (data ?? []).map((c) => ({ id: c.id, title: c.title ?? null, updated_at: c.updated_at }))
+    );
+    if (data && data.length > 0 && !currentConversationId) {
+      setCurrentConversationId(data[0].id);
+    }
   };
 
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    let data: any[] | null = null;
-    for (const table of MESSAGE_TABLES) {
-      const result = await fortressClient
-        .from(table)
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+    const { data, error } = await supabase
+      .from(MESSAGE_TABLE)
+      .select("id, role, content, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
 
-
-      if (!result.error && result.data) { data = result.data; break; }
-      const code = (result.error as any)?.code;
-      if (code !== "PGRST205" && code !== "42P01" && code !== "PGRST116") break;
-    }
-
-    if (data) {
+    if (!error && data) {
       setMessages(
         data.map((m: any) => ({
           ...m,
@@ -155,10 +132,11 @@ export function useAegisChat() {
       return null;
     }
 
-    // Fortress sets user_id automatically via RLS/trigger — no need to pass it
-    const { data, error } = await fortressClient
+    // user_id is required (no per-user auth on this Supabase, fortress JWT
+    // provides identity via useAuth — pass it explicitly on insert)
+    const { data, error } = await supabase
       .from(CONVERSATION_TABLE)
-      .insert({})
+      .insert({ user_id: userId })
       .select("id")
       .single();
 
@@ -178,7 +156,7 @@ export function useAegisChat() {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await fortressClient
+    const { data, error } = await supabase
       .from(MESSAGE_TABLE)
       .insert({
         conversation_id: conversationId,
@@ -194,7 +172,7 @@ export function useAegisChat() {
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await fortressClient.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
+    await supabase.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
     loadConversations();
   };
 
@@ -262,8 +240,10 @@ export function useAegisChat() {
     ];
 
     try {
-      const { data: { session } } = await fortressClient.auth.getSession();
-      const token = session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      // The aegis-chat function lives on this project's Supabase. Use the
+      // anon key (publishable) for the function-level auth — operator
+      // identity is passed in the request body, not the JWT.
+      const token = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const resp = await fetch(AEGIS_CHAT_URL, {
         method: "POST",
         headers: {
@@ -389,7 +369,7 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    await fortressClient.from(CONVERSATION_TABLE).delete().eq("id", id);
+    await supabase.from(CONVERSATION_TABLE).delete().eq("id", id);
 
     if (currentConversationId === id) {
       setCurrentConversationId(null);
