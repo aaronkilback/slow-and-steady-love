@@ -94,6 +94,46 @@ If you continue to claim "E2E encrypted" and you want the claim to survive a rea
 
 ---
 
+## Phased upgrade plan to genuinely meet/exceed Signal
+
+### P0 — Group encryption fix (shipped 2026-05-01)
+Previous behavior: group messages were encrypted only for the *first* non-self participant. Every other recipient saw ciphertext they could not decrypt; the sender of a 5-person chat effectively wrote into a void for 4/5 of the group.
+
+Implemented: `ConversationView.tsx` now produces a per-recipient envelope when there are 2+ recipients:
+```json
+{ "v": 1, "e": { "<user_id_a>": { "c": "<ciphertext>", "n": "<nonce>" }, ... } }
+```
+Each recipient (including the sender, so the sender can read history) gets their own ciphertext encrypted with `crypto_box_easy(plaintext, nonce, recipientPubkey, senderPrivkey)`. 1:1 conversations preserve the legacy single-ciphertext format for backward compatibility.
+
+This is a stop-gap encryption fan-out, not Signal's sender-keys protocol — every additional recipient adds one X25519 box op on send. Acceptable up to ~20-person groups; beyond that, sender keys become important.
+
+### Phase 1 — Verifiable + hardened (~2–3 days)
+1. **Safety numbers UI.** When two operators open a 1:1, show the hex / 60-digit fingerprint of `(sender_pubkey || recipient_pubkey)` sorted. "Verified" state persisted in localStorage. If a peer's pubkey ever changes mid-conversation, surface a red banner ("This person's safety number has changed — confirm out-of-band before continuing"). Closes the server-side MITM hole.
+2. **CSP tightening.** Strict CSP headers on the Cloudflare Pages deploy (`default-src 'self'`, no `unsafe-inline`, no `unsafe-eval`, explicit allowlist for the few external endpoints). Defends localStorage-stored encrypted privkey from XSS exfiltration.
+3. **Argon2id → SENSITIVE.** One-line change in `encryption.ts`. Invalidates existing stored keys, so users re-enter password once. Doubles the offline brute-force cost for an attacker who has the encrypted privkey blob.
+
+### Phase 2 — Forward secrecy (~2–3 weeks)
+Adopt **libsignal-protocol-javascript** or **olm/megolm**. Concretely:
+1. **X3DH** prekey bundles for new conversations — replaces the single-round X25519 with a richer initial handshake (identity + signed prekey + one-time prekey). Operators publish prekey bundles to Fortress; receivers consume them on first contact.
+2. **Double Ratchet** session state — every message advances both a Diffie-Hellman ratchet and a symmetric chain. Keys derived for message N are deleted as soon as N is decrypted. Compromise of today's device does not reveal yesterday's plaintext.
+3. **Sender keys for groups** — sender derives a chain key, distributes it once via per-recipient X3DH, then encrypts each subsequent group message with a single ratcheting symmetric key. Cuts the fan-out cost and adds in-group forward secrecy.
+
+This is the work that earns "Signal-grade" externally.
+
+### Phase 3 — Metadata protection (~1 week)
+**Sealed sender** envelope. Today the server sees `(sender_id, recipient_id, conversation_id, timestamp)` per message — encrypted content but plaintext metadata. Sealed sender wraps the sender identity inside an envelope that only the recipient can open, so the server only sees the recipient. Worth doing once Phase 2 lands.
+
+### What you cannot ever match without dedicated infra
+- **Anonymous routing** (Tor / mixnets). Signal doesn't even claim this.
+- **Forward secrecy on attachments at rest**. Per-message keys are easier; attachment keys are typically derived once and reused.
+
+### Honest external claim once Phase 2 ships
+> "End-to-end encrypted using the Signal Protocol — X25519 with prekey bundles, Double Ratchet for per-message forward secrecy, sender keys for groups, with operator-verifiable safety numbers."
+
+That sentence becomes truthful after the phased work above. Until then, stay with the more conservative claim already documented in the TL;DR.
+
+---
+
 ## Bottom line for the FIFA pitch
 
 If a CRT sales conversation references "encrypted team messaging," what you can say truthfully today:

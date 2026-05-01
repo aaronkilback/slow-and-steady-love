@@ -245,20 +245,43 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       
       const messagesWithSender = await Promise.all(data.map(async (msg: any) => {
         let decryptedContent = msg.content;
-        
-        // Try to decrypt if message is encrypted and we're unlocked
-        if (msg.encrypted && msg.nonce && isUnlocked && currentUserId) {
+
+        // Decrypt only when the user is unlocked. Two formats:
+        //   1:1   — content is base64 ciphertext, nonce in msg.nonce.
+        //   group — content is JSON envelope with per-recipient blobs;
+        //           pull the entry keyed by currentUserId.
+        if (msg.encrypted && isUnlocked && currentUserId) {
           try {
-            const decrypted = await decrypt(msg.content, msg.nonce, msg.sender_id);
-            if (decrypted) {
-              decryptedContent = decrypted;
+            let ciphertext: string | null = null;
+            let nonce: string | null = null;
+
+            if (typeof msg.content === "string" && msg.content.startsWith('{"v":')) {
+              const env = JSON.parse(msg.content);
+              const slot = env?.e?.[currentUserId];
+              if (slot?.c && slot?.n) {
+                ciphertext = slot.c;
+                nonce = slot.n;
+              }
+            } else if (msg.nonce) {
+              ciphertext = msg.content;
+              nonce = msg.nonce;
+            }
+
+            if (ciphertext && nonce) {
+              const decrypted = await decrypt(ciphertext, nonce, msg.sender_id);
+              if (decrypted) decryptedContent = decrypted;
+              else decryptedContent = "🔒 [Unable to decrypt]";
+            } else {
+              // Group message we're not a recipient of (shouldn't happen
+              // if the sender included us, but flag it loudly).
+              decryptedContent = "🔒 [Not a recipient — cannot decrypt]";
             }
           } catch (e) {
             console.error("Decryption failed:", e);
             decryptedContent = "🔒 [Unable to decrypt]";
           }
         }
-        
+
         return {
           ...msg,
           sender: profilesMap[msg.sender_id] || { full_name: 'Unknown', avatar_url: null, public_key: null },
@@ -371,17 +394,40 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       let messageNonce: string | null = null;
       let isEncrypted = false;
 
-      // Encrypt message if possible
+      // Encrypt for every participant who has a public key (including the
+      // sender, so the sender can read their own message back later).
+      //
+      // 1:1 — single ciphertext, nonce in dedicated column (back-compat).
+      // Group / >1 recipient — JSON envelope with one ciphertext per
+      // recipient packed into the content column:
+      //   {"v":1,"e":{"<user_id>":{"c":"<base64>","n":"<base64>"},...}}
+      // Decryption reads the envelope, finds its own entry, and decrypts
+      // with the sender's public key + own private key.
       if (canEncrypt && messageContent) {
-        // For group chats, we'd need to encrypt for each recipient
-        // For now, encrypt for the first non-self participant
-        const otherParticipant = participants.find(p => p.user_id !== currentUserId && p.public_key);
-        
-        if (otherParticipant) {
-          const encrypted = await encrypt(messageContent, otherParticipant.user_id);
-          if (encrypted) {
-            messageContent = encrypted.ciphertext;
-            messageNonce = encrypted.nonce;
+        const recipients = participants.filter(p => p.public_key); // includes self
+        const otherRecipients = recipients.filter(p => p.user_id !== currentUserId);
+
+        if (otherRecipients.length === 1) {
+          // 1:1 fast path — preserve the legacy single-ciphertext format
+          // so older clients (and the existing decrypt path) keep working.
+          const enc = await encrypt(messageContent, otherRecipients[0].user_id);
+          if (enc) {
+            messageContent = enc.ciphertext;
+            messageNonce = enc.nonce;
+            isEncrypted = true;
+          }
+        } else if (otherRecipients.length > 1) {
+          // Group path — encrypt once per recipient (sender included so
+          // the sender can read history). Per-recipient envelopes
+          // packed into content as JSON.
+          const envelope: Record<string, { c: string; n: string }> = {};
+          for (const recipient of recipients) {
+            const enc = await encrypt(messageContent, recipient.user_id);
+            if (enc) envelope[recipient.user_id] = { c: enc.ciphertext, n: enc.nonce };
+          }
+          if (Object.keys(envelope).length > 0) {
+            messageContent = JSON.stringify({ v: 1, e: envelope });
+            messageNonce = null; // envelope carries per-recipient nonces
             isEncrypted = true;
           }
         }
