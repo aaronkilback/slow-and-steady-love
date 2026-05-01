@@ -117,19 +117,10 @@ export function isRecentSignal(s: any): boolean {
   // that here so mobile doesn't show test data the operator never sees
   // on the Fortress signals page.
   if (s.is_test === true) return false;
-  // Mobile is the "untouched signal" surface — once an analyst has
-  // triaged / investigated / resolved / archived / false-positive'd a
-  // signal in Fortress, drop it from the mobile feed automatically.
-  // Treat null/missing status as 'new' so freshly-ingested signals
-  // still appear before they've been classified.
-  if (s.status && s.status !== "new") return false;
-  // Mobile is for actionable signals, not informational reading.
-  // Severity 'low' is reserved on Fortress for community outreach,
-  // routine politics, distant geopolitical content — none of it
-  // demands an operator open the app. The existing isQuestionable
-  // check already drops sub-0.4 quality rows.
-  const sev = (s.severity || "").toLowerCase();
-  if (sev === "low") return false;
+  // Match Fortress webapp's base query — only archived signals are
+  // dropped at this layer. Triaged / investigating / resolved still
+  // belong on the Recent tab so mobile mirrors it.
+  if (s.status === "archived") return false;
   if (isAutoHidden(s)) return false;
   if (isCyberAdvisory(s)) return false;
 
