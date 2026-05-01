@@ -510,8 +510,12 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       } else {
         setNewMessage("");
         setAttachments([]);
+        // Agent context is STICKY — once an operator mentions an agent,
+        // every subsequent message routes to the same agent(s) until
+        // they explicitly clear via the × on a chip or "clear" link.
+        // This matches the way operators talk to a specialist in a
+        // working session: they don't re-tag for every follow-up.
         const targets = mentionedAgents;
-        setMentionedAgents([]);
         setMentionStart(-1);
 
         // Fan out one respond-as-agent call per addressed agent. Each
@@ -854,7 +858,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
               <Bot className="h-3.5 w-3.5 text-primary shrink-0" />
               <span className="text-primary mr-1">
-                Asking {mentionedAgents.length === 1 ? "agent" : `${mentionedAgents.length} agents`}:
+                In dialogue with {mentionedAgents.length === 1 ? "" : `${mentionedAgents.length} agents:`}
               </span>
               {mentionedAgents.map((agent) => (
                 <span
@@ -924,16 +928,12 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                 } else {
                   setMentionStart(-1);
                 }
-                // Drop any tracked agents whose `@CALL-SIGN` was edited out
-                // of the message text. Keeps state and visible tokens in sync.
-                if (mentionedAgents.length > 0) {
-                  const stillReferenced = mentionedAgents.filter((a) =>
-                    v.includes(`@${a.call_sign}`)
-                  );
-                  if (stillReferenced.length !== mentionedAgents.length) {
-                    setMentionedAgents(stillReferenced);
-                  }
-                }
+                // Sticky agent context — once an agent is mentioned in a
+                // conversation, the operator stays "in dialogue" with
+                // them across follow-up messages without re-typing the
+                // @-tag. The chip's × button (or the global 'clear') is
+                // the only way to drop an agent. Don't auto-clear when
+                // the @<call_sign> token isn't in the current draft.
               }}
               onKeyDown={handleKeyPress}
               placeholder="Type a message... (@ to mention an agent)"

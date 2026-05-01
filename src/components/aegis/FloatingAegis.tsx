@@ -88,19 +88,16 @@ export function FloatingAegis({ className }: FloatingAegisProps) {
             {/* SOS Button */}
             <SOSButton onTrigger={handleSOSTrigger} />
             
-            {/* Aegis Button */}
-            <div className="relative">
-              <Button
-                size="icon"
-                onClick={() => setIsOpen(true)}
-                className="h-14 w-14 rounded-full shadow-lg glow-cyan bg-primary hover:bg-primary/90"
-              >
-                <Shield className="h-6 w-6" />
-              </Button>
-              
-              {/* Pulse animation */}
-              <span className="absolute inset-0 rounded-full bg-primary/30 animate-ping pointer-events-none" />
-            </div>
+            {/* Aegis Button — pulse animation removed; operators reported
+                the constantly-pinging halo was visually noisy. The button
+                itself stays so they can pop the chat from any page. */}
+            <Button
+              size="icon"
+              onClick={() => setIsOpen(true)}
+              className="h-14 w-14 rounded-full shadow-lg glow-cyan bg-primary hover:bg-primary/90"
+            >
+              <Shield className="h-6 w-6" />
+            </Button>
           </motion.div>
         )}
       </AnimatePresence>
