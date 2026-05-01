@@ -17,6 +17,7 @@ import InstallPage from "./pages/InstallPage";
 import CommsPage from "./pages/CommsPage";
 import SOSPage from "./pages/SOSPage";
 import NetworkScanPage from "./pages/NetworkScanPage";
+import InvitePage from "./pages/InvitePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,8 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/install" element={<InstallPage />} />
+            {/* Public invite acceptance — no auth required */}
+            <Route path="/invite/:token" element={<InvitePage />} />
             <Route element={
               <ProtectedRoute>
                 <AppLayout />
