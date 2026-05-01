@@ -41,6 +41,93 @@ export interface Operator {
   status?: "online" | "busy" | "offline";
 }
 
+// CYBER_ADVISORY_CATEGORIES + classifySignal mirror the logic in
+// Fortress webapp's SignalHistory.tsx so the mobile Recent feed matches
+// what /signals shows under the Recent tab on Fortress. Updates here
+// must stay in lockstep with Fortress.
+const CYBER_ADVISORY_CATEGORIES = new Set([
+  "cyber_threat",
+  "vulnerability",
+  "malware",
+  "phishing",
+  "data_breach",
+  "ransomware",
+]);
+
+const INTERNATIONAL_URL_PATTERNS = [
+  /locale=(?!en_CA|en_US)[a-z]{2}_[A-Z]{2}/i,
+  /otagodailytimes/i, /maribyrnong/i, /netflixuk/i,
+  /\.com\.au\b/, /\.co\.uk\b/, /\.co\.nz\b/, /\.de\b/, /\.fr\b/, /\.at\b/,
+];
+const INTERNATIONAL_CONTENT_PATTERNS = [
+  /extinction rebellion\s+(austria|germany|uk|cape town|australia|netherlands|sweden|norway|france|italy|spain|japan)/i,
+  /\b(new zealand|fonterra|melbourne|sydney|london|berlin|paris|tokyo)\b/i,
+];
+
+function isAutoHidden(s: any): boolean {
+  return s.relevance_score != null && s.relevance_score === 0;
+}
+
+function isCyberAdvisory(s: any): boolean {
+  const cat = s.rule_category || s.category || "";
+  return CYBER_ADVISORY_CATEGORIES.has(cat) && (s.relevance_score ?? 1) < 0.55;
+}
+
+function isInternationalSignal(s: any): boolean {
+  const sourceUrl = (s.source_url || s.raw_json?.source_url || s.raw_json?.url || "").toLowerCase();
+  const text = `${s.normalized_text || ""} ${s.title || ""} ${s.description || ""}`.toLowerCase();
+  if (INTERNATIONAL_URL_PATTERNS.some((p) => p.test(sourceUrl))) return true;
+  if (INTERNATIONAL_CONTENT_PATTERNS.some((p) => p.test(text))) return true;
+  return false;
+}
+
+function isQuestionableSignal(s: any): boolean {
+  if (s.quality_score != null && s.quality_score < 0.4) return true;
+  if (s.relevance_score != null && s.relevance_score > 0 && s.relevance_score < 0.4) return true;
+  // confidence may be stored as 0-1 or 0-100; treat <0.3 / <30 as low
+  const conf = s.confidence;
+  if (typeof conf === "number") {
+    const normalized = conf > 1 ? conf : conf * 100;
+    if (normalized < 30) return true;
+  }
+  const text = `${s.normalized_text || ""} ${s.title || ""} ${s.description || ""}`.toLowerCase();
+  const sourceUrl = (s.source_url || s.raw_json?.source_url || s.raw_json?.url || "").toLowerCase();
+  if (/netflix|webinar|documentary|book launch|podcast/i.test(text)) return true;
+  if (/netflix|spotify|youtube\.com\/watch/i.test(sourceUrl)) return true;
+  if (s.normalized_text && s.normalized_text.length < 60) return true;
+  return false;
+}
+
+function isWithin90Days(s: any): boolean {
+  const date = new Date(s.event_date || s.created_at);
+  return Date.now() - date.getTime() <= 90 * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * True when the signal belongs in the mobile Recent feed.
+ * Mirrors classifySignal === 'recent' on Fortress webapp.
+ * Exported so SignalFeed's realtime INSERT handler can apply the same
+ * predicate.
+ */
+export function isRecentSignal(s: any): boolean {
+  if (s.deleted_at) return false;
+  if (s.status === "archived" || s.status === "false_positive") return false;
+  if (isAutoHidden(s)) return false;
+  if (isCyberAdvisory(s)) return false;
+
+  // Manual override takes precedence over auto-classification
+  if (s.triage_override === "historical") return false;
+  if (s.triage_override === "review") return false;
+  if (s.triage_override === "international") return false;
+  if (s.triage_override === "recent") return true;
+
+  if (s.signal_type === "historical") return false;
+  if (isInternationalSignal(s)) return false;
+  if (isQuestionableSignal(s)) return false;
+  if (!isWithin90Days(s)) return false;
+  return true;
+}
+
 export function useSignals() {
   return useQuery({
     queryKey: ["fortress-signals"],
@@ -65,34 +152,19 @@ export function useSignals() {
           raw: signal,
         }));
 
-      // "Recent" mirrors the Fortress webapp's Recent tab on /signals:
-      //   - not soft-deleted
-      //   - not analyst-archived or false-positive
-      //   - not flagged historical (triage_override / signal_type)
-      //   - within the last 90 days
-      //
-      // Filtering happens client-side after fetching the most recent 200.
-      // Two chained .or() calls don't AND reliably through PostgREST and
-      // server-side filters silently dropped earlier — keeping it in JS
-      // makes the rules unambiguous and easy to evolve.
-      const ninetyDaysAgoMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
-
+      // Fetch a generous window then apply the full Fortress-equivalent
+      // Recent classifier client-side (see isRecentSignal). Doing this in
+      // JS instead of PostgREST keeps every rule in one place and avoids
+      // the chained-.or() bugs we hit before.
       for (const table of SIGNAL_TABLES) {
         const { data, error } = await fortressClient
           .from(table)
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(200);
+          .limit(300);
 
         if (!error && data) {
-          const recent = data.filter((s: any) => {
-            if (s.deleted_at) return false;
-            if (s.status === "archived" || s.status === "false_positive") return false;
-            if (s.triage_override === "historical") return false;
-            if (s.signal_type === "historical") return false;
-            if (new Date(s.created_at).getTime() < ninetyDaysAgoMs) return false;
-            return true;
-          });
+          const recent = data.filter(isRecentSignal);
           return mapSignals(recent).slice(0, 100);
         }
 

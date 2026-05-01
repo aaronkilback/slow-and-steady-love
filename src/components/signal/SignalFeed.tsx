@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { useSignals, Signal as SignalType } from "@/hooks/useFortressData";
+import { useSignals, isRecentSignal, Signal as SignalType } from "@/hooks/useFortressData";
 import { fortressClient } from "@/lib/fortress-client";
 
 type Severity = "critical" | "high" | "medium" | "low";
@@ -195,9 +195,9 @@ export function SignalFeed() {
     }
   }, [signals]);
 
-  // Subscribe to realtime updates — apply the same Recent filter the
-  // initial fetch uses, so historical / archived / soft-deleted signals
-  // never push into the feed via INSERT events.
+  // Subscribe to realtime updates — reuse the same Fortress-equivalent
+  // Recent classifier so historical / international / low-confidence /
+  // auto-hidden signals never push into the feed via INSERT events.
   useEffect(() => {
     const channel = fortressClient
       .channel("signals-realtime")
@@ -210,10 +210,7 @@ export function SignalFeed() {
         },
         (payload) => {
           const s: any = payload.new;
-          if (s.deleted_at) return;
-          if (s.status === "archived" || s.status === "false_positive") return;
-          if (s.triage_override === "historical") return;
-          if (s.signal_type === "historical") return;
+          if (!isRecentSignal(s)) return;
           setLocalSignals((prev) => [s as SignalType, ...prev]);
         }
       )
