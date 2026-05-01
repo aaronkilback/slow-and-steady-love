@@ -117,7 +117,12 @@ export function isRecentSignal(s: any): boolean {
   // that here so mobile doesn't show test data the operator never sees
   // on the Fortress signals page.
   if (s.is_test === true) return false;
-  if (s.status === "archived" || s.status === "false_positive") return false;
+  // Mobile is the "untouched signal" surface — once an analyst has
+  // triaged / investigated / resolved / archived / false-positive'd a
+  // signal in Fortress, drop it from the mobile feed automatically.
+  // Treat null/missing status as 'new' so freshly-ingested signals
+  // still appear before they've been classified.
+  if (s.status && s.status !== "new") return false;
   if (isAutoHidden(s)) return false;
   if (isCyberAdvisory(s)) return false;
 
