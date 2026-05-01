@@ -8,8 +8,15 @@ export function AppLayout() {
   const location = useLocation();
   useLocationTracking();
   
-  // Don't show floating Aegis on the Aegis page itself
-  const showFloatingAegis = location.pathname !== "/aegis";
+  // Don't show floating Aegis on pages that have their own bottom-anchored
+  // input bar — the floating button overlaps the send button on those
+  // pages (Messages conversations, Aegis chat, Comms SMS thread, the
+  // active SOS view, and Agent chats). Operators can still reach Aegis
+  // via the bottom nav tab on every page.
+  const noFloatPaths = ["/aegis", "/messages", "/comms", "/sos"];
+  const showFloatingAegis =
+    !noFloatPaths.includes(location.pathname) &&
+    !location.pathname.startsWith("/agent/");
 
   return (
     <div className="flex h-[100dvh] flex-col bg-background overflow-hidden">
