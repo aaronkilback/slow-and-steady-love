@@ -111,6 +111,12 @@ function isWithin90Days(s: any): boolean {
  */
 export function isRecentSignal(s: any): boolean {
   if (s.deleted_at) return false;
+  // QA agent emits synthetic signals with is_test=true during test runs
+  // (Wet'suwet'en land defender blockade variants, example.com sources,
+  //  etc.). Fortress webapp filters these out at the query layer; mirror
+  // that here so mobile doesn't show test data the operator never sees
+  // on the Fortress signals page.
+  if (s.is_test === true) return false;
   if (s.status === "archived" || s.status === "false_positive") return false;
   if (isAutoHidden(s)) return false;
   if (isCyberAdvisory(s)) return false;
