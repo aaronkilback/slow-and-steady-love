@@ -185,7 +185,7 @@ function SignalCard({ signal }: { signal: SignalType }) {
 }
 
 export function SignalFeed() {
-  const { data: signals = [], isLoading } = useSignals();
+  const { data: signals = [], isLoading, error } = useSignals();
   const [localSignals, setLocalSignals] = useState<SignalType[]>([]);
 
   // Update local signals when data changes
@@ -245,9 +245,13 @@ export function SignalFeed() {
           {localSignals.length === 0 ? (
             <div className="text-center py-12">
               <Radio className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-              <p className="text-muted-foreground">No signals detected</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                All systems operating normally
+              <p className="text-muted-foreground">
+                {error ? "Could not load signals" : "No signals detected"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                {error
+                  ? `${(error as any)?.message || error}. Check that you are signed in to an account with signal access (super_admin or analyst with client mapping).`
+                  : "All actionable signals have been triaged. Check Fortress for the full feed."}
               </p>
             </div>
           ) : (
