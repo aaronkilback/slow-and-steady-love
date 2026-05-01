@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { fortressClient } from "@/lib/fortress-client";
+import { useToast } from "@/hooks/use-toast";
 import { ConversationView } from "./ConversationView";
 import { BroadcastList } from "./BroadcastList";
 import { NewConversationDialog } from "./NewConversationDialog";
@@ -37,20 +38,33 @@ export function MessagingHub() {
   const [isLoading, setIsLoading] = useState(true);
   const [showNewConversation, setShowNewConversation] = useState(false);
   const [creatingSoloDesk, setCreatingSoloDesk] = useState(false);
+  const { toast } = useToast();
 
   // "Solo intel desk" — a conversation with just the current operator,
   // intended as a private workspace where they can @-mention agents
   // and consult them without needing other humans on the team yet.
+  //
+  // IMPORTANT: must call through fortressClient, not the bare `supabase`
+  // export. The two clients use different localStorage keys for auth
+  // ('fortress-auth-token' vs the default sb-… key) and the user's
+  // session lives only on fortressClient — so supabase.rpc here ran
+  // anonymously, the RPC's auth.uid() check failed, and the button
+  // appeared to do nothing.
   const startSoloDesk = async () => {
     if (creatingSoloDesk) return;
     setCreatingSoloDesk(true);
     try {
-      const { data: newConvId, error } = await supabase.rpc(
+      const { data: newConvId, error } = await fortressClient.rpc(
         "create_conversation_with_participant",
         { _name: "Personal Intel Desk", _is_group: false }
       );
       if (error || !newConvId) {
         console.error("[MessagingHub] solo desk create failed:", error);
+        toast({
+          variant: "destructive",
+          title: "Couldn't create solo desk",
+          description: error?.message || "Unknown error — try again or check your sign-in.",
+        });
         return;
       }
       setSelectedConversation(newConvId as unknown as string);
