@@ -137,10 +137,21 @@ export function isRecentSignal(s: any): boolean {
   return true;
 }
 
+// Default mobile feed is scoped to Petronas Canada — Fortress webapp's
+// signals page applies the same client filter when an operator has
+// Petronas selected, so this keeps the two surfaces in sync. Override
+// via localStorage if a different client should be the default.
+const PETRONAS_CLIENT_ID = "0f5c809d-60ec-4252-b94b-1f4b6c8ac95d";
+
+function getActiveClientId(): string {
+  return localStorage.getItem("aegis_active_client_id") || PETRONAS_CLIENT_ID;
+}
+
 export function useSignals() {
   return useQuery({
-    queryKey: ["fortress-signals"],
+    queryKey: ["fortress-signals", getActiveClientId()],
     queryFn: async () => {
+      const clientId = getActiveClientId();
       // Try multiple table names for cross-platform compatibility
       const SIGNAL_TABLES = ["signals", "security_signals", "alerts"] as const;
 
@@ -169,6 +180,7 @@ export function useSignals() {
         const { data, error } = await fortressClient
           .from(table)
           .select("*")
+          .eq("client_id", clientId)
           .order("created_at", { ascending: false })
           .limit(300);
 

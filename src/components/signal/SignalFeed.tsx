@@ -198,7 +198,9 @@ export function SignalFeed() {
   // Subscribe to realtime updates — reuse the same Fortress-equivalent
   // Recent classifier so historical / international / low-confidence /
   // auto-hidden signals never push into the feed via INSERT events.
+  // Also enforce the active client filter on the realtime side.
   useEffect(() => {
+    const activeClientId = localStorage.getItem("aegis_active_client_id") || "0f5c809d-60ec-4252-b94b-1f4b6c8ac95d";
     const channel = fortressClient
       .channel("signals-realtime")
       .on(
@@ -207,6 +209,7 @@ export function SignalFeed() {
           event: "INSERT",
           schema: "public",
           table: "signals",
+          filter: `client_id=eq.${activeClientId}`,
         },
         (payload) => {
           const s: any = payload.new;
