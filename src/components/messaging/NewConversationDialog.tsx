@@ -61,21 +61,30 @@ export function NewConversationDialog({ open, onOpenChange, onConversationCreate
 
   const loadProfiles = async () => {
     setIsLoading(true);
-    // Get current user from Fortress
     const { data: { user } } = await fortressClient.auth.getUser();
-    
-    // Load profiles from Fortress platform
-    const { data, error } = await fortressClient
-      .from('profiles')
-      .select('id, full_name, avatar_url')
-      .neq('id', user?.id || '');
 
-    if (!error && data) {
-      setProfiles(data);
+    // Fortress profiles use `name` (not `full_name`). Try the canonical
+    // column first, fall back to the older schema.
+    let rows: Profile[] = [];
+    const a = await fortressClient
+      .from("profiles")
+      .select("id, name, avatar_url")
+      .neq("id", user?.id || "");
+    if (!a.error && a.data) {
+      rows = a.data.map((p: any) => ({
+        id: p.id,
+        full_name: p.name || "Operator",
+        avatar_url: p.avatar_url,
+      }));
     } else {
-      console.log("Could not load profiles from Fortress:", error?.message);
-      setProfiles([]);
+      const b = await fortressClient
+        .from("profiles")
+        .select("id, full_name, avatar_url")
+        .neq("id", user?.id || "");
+      if (!b.error && b.data) rows = b.data as Profile[];
+      else console.log("Could not load profiles from Fortress:", b.error?.message);
     }
+    setProfiles(rows);
     setIsLoading(false);
   };
 

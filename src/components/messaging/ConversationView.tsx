@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2, MapPin, Shield } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin, Shield, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,6 +18,7 @@ import { SOSButton } from "./SOSButton";
 import { EncryptionStatus } from "@/components/encryption/EncryptionStatus";
 import { EncryptionSetup } from "@/components/encryption/EncryptionSetup";
 import { EncryptionUnlock } from "@/components/encryption/EncryptionUnlock";
+import { AddOperatorsDialog } from "./AddOperatorsDialog";
 
 interface Message {
   id: string;
@@ -62,6 +63,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [participants, setParticipants] = useState<Array<{ user_id: string; public_key: string | null }>>([]);
   const [showEncryptionSetup, setShowEncryptionSetup] = useState(false);
   const [showEncryptionUnlock, setShowEncryptionUnlock] = useState(false);
+  const [showAddOperators, setShowAddOperators] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   
@@ -541,6 +543,14 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowAddOperators(true)}
+              title="Add operators"
+            >
+              <UserPlus className="h-5 w-5" />
+            </Button>
             {!isUnlocked && publicKey && (
               <Button variant="ghost" size="icon" onClick={() => setShowEncryptionUnlock(true)}>
                 <Shield className="h-5 w-5 text-amber-500" />
@@ -724,6 +734,19 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         conversationId={conversationId}
         isOpen={showLocationMap}
         onClose={() => setShowLocationMap(false)}
+      />
+
+      <AddOperatorsDialog
+        open={showAddOperators}
+        onOpenChange={setShowAddOperators}
+        conversationId={conversationId}
+        existingParticipantIds={participants.map((p) => p.user_id)}
+        onAdded={() => {
+          // Refresh participant list + messages so the new members show
+          // up immediately and the encryption status banner re-evaluates.
+          loadConversationDetails();
+          loadMessages();
+        }}
       />
 
       <EncryptionSetup
