@@ -261,8 +261,11 @@ export function useAgentChat(agentId: string = "aegis") {
       return data.id;
     }
 
-    if (error) console.warn("Could not create conversation:", error.message);
-    toast({ variant: "destructive", title: "Chat unavailable", description: "Unable to create conversation" });
+    // Surface the real Postgres / RLS error so we can diagnose instead
+    // of showing the user (and ourselves) a generic "unavailable".
+    const detail = error?.message || error?.details || error?.hint || "Unable to create conversation";
+    console.warn("Could not create conversation:", { error, agentId, fortressAgentId });
+    toast({ variant: "destructive", title: "Chat unavailable", description: detail });
     return null;
   };
 
