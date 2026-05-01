@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Loader2, MapPin, Shield, UserPlus } from "lucide-react";
+import { ArrowLeft, Send, Loader2, MapPin, Shield, UserPlus, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,11 +19,17 @@ import { EncryptionStatus } from "@/components/encryption/EncryptionStatus";
 import { EncryptionSetup } from "@/components/encryption/EncryptionSetup";
 import { EncryptionUnlock } from "@/components/encryption/EncryptionUnlock";
 import { AddOperatorsDialog } from "./AddOperatorsDialog";
+import { AgentMentionTypeahead, shortenSpecialty, type MentionableAgent } from "./AgentMentionTypeahead";
+import { useAgents } from "@/hooks/useFortressData";
 
 interface Message {
   id: string;
   content: string;
-  sender_id: string;
+  sender_id: string | null;
+  agent_id?: string | null;
+  agent_call_sign?: string | null;
+  is_agent_query?: boolean;
+  mentioned_agent_id?: string | null;
   created_at: string;
   attachments?: MessageAttachment[];
   encrypted?: boolean;
@@ -64,6 +70,20 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [showEncryptionSetup, setShowEncryptionSetup] = useState(false);
   const [showEncryptionUnlock, setShowEncryptionUnlock] = useState(false);
   const [showAddOperators, setShowAddOperators] = useState(false);
+
+  // ── Agent mention typeahead state ──
+  // mentionStart = index of the `@` that opened the popover (-1 = closed).
+  // mentionedAgent = the agent the operator selected from the list, the
+  // one we'll route the message to.
+  const [mentionStart, setMentionStart] = useState<number>(-1);
+  const [mentionedAgent, setMentionedAgent] = useState<MentionableAgent | null>(null);
+  const [isAgentResponding, setIsAgentResponding] = useState(false);
+  const { data: fortressAgents = [] } = useAgents();
+  const mentionableAgents: MentionableAgent[] = fortressAgents.map((a: any) => ({
+    id: a.id,
+    call_sign: a.name, // useAgents maps call_sign → name
+    short_specialty: shortenSpecialty(a.specialty),
+  }));
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   
@@ -207,6 +227,9 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         id,
         content,
         sender_id,
+        agent_id,
+        is_agent_query,
+        mentioned_agent_id,
         created_at,
         attachments,
         encrypted,
@@ -216,10 +239,15 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       .order('created_at', { ascending: true });
 
     if (!error && data) {
-      // Get unique sender IDs
-      const senderIds = [...new Set(data.map((m: any) => m.sender_id))];
-      
-      // Fetch profiles from Fortress (try 'name' first, fallback to 'full_name')
+      // Resolve human senders (profiles) and agent senders (ai_agents)
+      // in parallel.
+      const senderIds = [...new Set(data.map((m: any) => m.sender_id).filter(Boolean))] as string[];
+      const agentIds = [
+        ...new Set(
+          data.flatMap((m: any) => [m.agent_id, m.mentioned_agent_id]).filter(Boolean)
+        ),
+      ] as string[];
+
       let profilesMap: Record<string, { full_name: string; avatar_url: string | null; public_key: string | null }> = {};
       if (senderIds.length > 0) {
         let profilesData = null;
@@ -227,7 +255,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
           .from('profiles')
           .select('id, name, avatar_url, public_key')
           .in('id', senderIds);
-        
+
         if (!nameError && nameData) {
           profilesData = nameData.map((p: any) => ({ ...p, full_name: p.name }));
         } else {
@@ -237,11 +265,22 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             .in('id', senderIds);
           profilesData = fullNameData;
         }
-        
+
         if (profilesData) {
           profilesMap = Object.fromEntries(
             profilesData.map((p: any) => [p.id, { full_name: p.full_name || p.name, avatar_url: p.avatar_url, public_key: p.public_key }])
           );
+        }
+      }
+
+      let agentCallSignMap: Record<string, string> = {};
+      if (agentIds.length > 0) {
+        const { data: agentRows } = await fortressClient
+          .from('ai_agents')
+          .select('id, call_sign')
+          .in('id', agentIds);
+        if (agentRows) {
+          agentCallSignMap = Object.fromEntries(agentRows.map((a: any) => [a.id, a.call_sign]));
         }
       }
       
@@ -286,7 +325,10 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
 
         return {
           ...msg,
-          sender: profilesMap[msg.sender_id] || { full_name: 'Unknown', avatar_url: null, public_key: null },
+          sender: msg.sender_id
+            ? (profilesMap[msg.sender_id] || { full_name: 'Unknown', avatar_url: null, public_key: null })
+            : { full_name: agentCallSignMap[msg.agent_id] || 'AI Agent', avatar_url: null, public_key: null },
+          agent_call_sign: msg.agent_id ? agentCallSignMap[msg.agent_id] || null : null,
           attachments: msg.attachments || [],
           decryptedContent,
         };
@@ -395,17 +437,12 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       let messageContent = newMessage.trim();
       let messageNonce: string | null = null;
       let isEncrypted = false;
+      const isAgentQuery = !!mentionedAgent;
 
-      // Encrypt for every participant who has a public key (including the
-      // sender, so the sender can read their own message back later).
-      //
-      // 1:1 — single ciphertext, nonce in dedicated column (back-compat).
-      // Group / >1 recipient — JSON envelope with one ciphertext per
-      // recipient packed into the content column:
-      //   {"v":1,"e":{"<user_id>":{"c":"<base64>","n":"<base64>"},...}}
-      // Decryption reads the envelope, finds its own entry, and decrypts
-      // with the sender's public key + own private key.
-      if (canEncrypt && messageContent) {
+      // Agent-targeted messages skip encryption: the agent runs server-
+      // side and needs plaintext to read. UI flags them so operators
+      // know the server can read these specific messages.
+      if (canEncrypt && messageContent && !isAgentQuery) {
         const recipients = participants.filter(p => p.public_key); // includes self
         const otherRecipients = recipients.filter(p => p.user_id !== currentUserId);
 
@@ -442,11 +479,15 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         attachments: uploadedAttachments.length > 0 ? uploadedAttachments : [],
         encrypted: isEncrypted,
         nonce: messageNonce,
+        is_agent_query: isAgentQuery,
+        mentioned_agent_id: mentionedAgent?.id ?? null,
       };
 
-      const { error } = await supabase
+      const { data: insertedMsg, error } = await supabase
         .from('messages')
-        .insert(messageData);
+        .insert(messageData)
+        .select('id')
+        .single();
 
       if (error) {
         toast({
@@ -457,6 +498,41 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
       } else {
         setNewMessage("");
         setAttachments([]);
+        const targetAgent = mentionedAgent;
+        setMentionedAgent(null);
+        setMentionStart(-1);
+
+        // Fire the agent response in the background so the UI doesn't
+        // block on the LLM call. Realtime subscription will pick up
+        // the agent's reply when it lands.
+        if (targetAgent && insertedMsg?.id) {
+          setIsAgentResponding(true);
+          (async () => {
+            try {
+              const { data: { session } } = await fortressClient.auth.getSession();
+              const token = session?.access_token;
+              if (!token) return;
+              await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/respond-as-agent`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    conversation_id: conversationId,
+                    message_id: insertedMsg.id,
+                  }),
+                }
+              );
+            } catch (e) {
+              console.warn("[ConversationView] agent response failed:", e);
+            } finally {
+              setIsAgentResponding(false);
+            }
+          })();
+        }
       }
     } catch (err) {
       toast({
@@ -595,10 +671,11 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             ) : (
               <AnimatePresence initial={false}>
                 {messages.map((message) => {
-                  const isOwn = message.sender_id === currentUserId;
+                  const isAgent = !!message.agent_id;
+                  const isOwn = !isAgent && message.sender_id === currentUserId;
                   const hasContent = message.content.trim().length > 0;
                   const hasAttachments = message.attachments && message.attachments.length > 0;
-                  
+
                   return (
                     <motion.div
                       key={message.id}
@@ -610,10 +687,18 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                       <div className={cn("flex gap-2 max-w-[85%]", isOwn && "flex-row-reverse")}>
                         {!isOwn && (
                           <Avatar className="h-8 w-8 flex-shrink-0">
-                            <AvatarImage src={message.sender?.avatar_url || undefined} />
-                            <AvatarFallback className="text-xs">
-                              {message.sender?.full_name?.charAt(0) || "?"}
-                            </AvatarFallback>
+                            {isAgent ? (
+                              <AvatarFallback className="text-xs bg-primary/15 text-primary">
+                                <Bot className="h-4 w-4" />
+                              </AvatarFallback>
+                            ) : (
+                              <>
+                                <AvatarImage src={message.sender?.avatar_url || undefined} />
+                                <AvatarFallback className="text-xs">
+                                  {message.sender?.full_name?.charAt(0) || "?"}
+                                </AvatarFallback>
+                              </>
+                            )}
                           </Avatar>
                         )}
                         <div
@@ -621,13 +706,24 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
                             "rounded-2xl overflow-hidden",
                             isOwn
                               ? "bg-primary text-primary-foreground rounded-br-md"
-                              : "bg-card border border-border rounded-bl-md",
+                              : isAgent
+                                ? "bg-primary/5 border border-primary/40 rounded-bl-md"
+                                : "bg-card border border-border rounded-bl-md",
                             hasContent ? "px-4 py-2" : hasAttachments ? "p-1" : "px-4 py-2"
                           )}
                         >
                           {!isOwn && hasContent && (
-                            <p className="text-xs font-medium text-primary mb-1">
-                              {message.sender?.full_name}
+                            <p className={cn(
+                              "text-xs font-medium mb-1 flex items-center gap-1.5",
+                              isAgent ? "text-primary" : "text-primary"
+                            )}>
+                              {isAgent && <Bot className="h-3 w-3" />}
+                              {isAgent ? message.agent_call_sign || message.sender?.full_name : message.sender?.full_name}
+                              {isAgent && (
+                                <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold ml-1">
+                                  agent
+                                </span>
+                              )}
                             </p>
                           )}
                           
@@ -700,7 +796,47 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         )}
 
         {/* Input */}
-        <div className="border-t border-border bg-card/50 p-4">
+        <div className="relative border-t border-border bg-card/50 p-4">
+          {mentionStart >= 0 && (
+            <AgentMentionTypeahead
+              query={newMessage.slice(mentionStart + 1)}
+              agents={mentionableAgents}
+              onSelect={(agent) => {
+                // Replace `@<typedQuery>` with `@CALL-SIGN ` and remember the agent
+                const before = newMessage.slice(0, mentionStart);
+                const after = newMessage.slice(mentionStart + 1).replace(/^\S*/, "");
+                const next = `${before}@${agent.call_sign} ${after.trimStart()}`;
+                setNewMessage(next);
+                setMentionedAgent(agent);
+                setMentionStart(-1);
+              }}
+              onClose={() => setMentionStart(-1)}
+            />
+          )}
+          {mentionedAgent && mentionStart < 0 && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-primary">
+              <Bot className="h-3.5 w-3.5" />
+              <span>
+                Asking <strong>{mentionedAgent.call_sign}</strong> ·{" "}
+                {mentionedAgent.short_specialty}
+              </span>
+              <button
+                onClick={() => {
+                  setMentionedAgent(null);
+                  setNewMessage(newMessage.replace(/@\S+\s*/, ""));
+                }}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+              >
+                clear
+              </button>
+            </div>
+          )}
+          {isAgentResponding && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Agent is composing a response...
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <SOSButton onTrigger={handleSOS} disabled={isSending} />
             <AttachmentPicker
@@ -709,9 +845,31 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
             />
             <Input
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setNewMessage(v);
+                // Detect a freshly-typed `@` (or the operator continuing
+                // to type after one). Close the popup when whitespace
+                // appears after the trigger.
+                const cursor = v.length;
+                const lastAt = v.lastIndexOf("@", cursor - 1);
+                if (lastAt >= 0) {
+                  const between = v.slice(lastAt + 1, cursor);
+                  if (!/\s/.test(between)) {
+                    setMentionStart(lastAt);
+                  } else {
+                    setMentionStart(-1);
+                  }
+                } else {
+                  setMentionStart(-1);
+                }
+                // If the operator has cleared the @mention text, drop the agent
+                if (mentionedAgent && !v.includes(`@${mentionedAgent.call_sign}`)) {
+                  setMentionedAgent(null);
+                }
+              }}
               onKeyDown={handleKeyPress}
-              placeholder="Type a message..."
+              placeholder="Type a message... (@ to mention an agent)"
               className="flex-1 bg-secondary border-0 focus-visible:ring-1 focus-visible:ring-primary"
               disabled={isSending}
             />
