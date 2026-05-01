@@ -18,73 +18,37 @@ const statusConfig: Record<AgentStatus, { label: string; color: string; dotColor
   offline: { label: "Offline", color: "text-muted-foreground", dotColor: "bg-muted-foreground" },
 };
 
-// Default AI agents that are always present in Aegis. Each card surfaces:
-//   - persona  → how the agent talks / what role it plays in the team
-//   - specialty → the domain expertise it owns (anchors operator trust)
-const defaultAiAgents: Agent[] = [
-  {
-    id: "aegis",
-    name: "Aegis",
-    type: "ai",
-    role: "Lead Intelligence Agent",
-    description: "Calm, tactical command-post AI. Synthesizes inputs from every other agent, briefs operators, and coordinates response.",
-    specialty: "Multi-agent orchestration, intelligence synthesis, command-post operations, and crisis coordination.",
-    status: "online",
-    capabilities: ["Threat Analysis", "Agent Coordination", "Intelligence Briefings", "System Monitoring"],
-  },
-  {
-    id: "sentinel",
-    name: "Sentinel",
-    type: "ai",
-    role: "Perimeter Defense Agent",
-    description: "Vigilant and methodical. Treats every anomaly as a potential intrusion until cleared.",
-    specialty: "Network perimeter defense, intrusion detection, firewall posture, and access-control review.",
-    status: "online",
-    capabilities: ["Firewall Management", "Intrusion Detection", "Access Control", "Traffic Analysis"],
-  },
-  {
-    id: "osint",
-    name: "OSINT Hunter",
-    type: "ai",
-    role: "Open Source Intelligence Agent",
-    description: "Patient and persistent investigator. Surfaces what's public before adversaries weaponize it.",
-    specialty: "Dark-web monitoring, social-engineering detection, brand exposure, and adversary-attribution research.",
-    status: "online",
-    capabilities: ["Threat Intelligence", "Dark Web Monitoring", "Social Engineering Detection", "Brand Monitoring"],
-  },
-  {
-    id: "monitor",
-    name: "Monitor",
-    type: "ai",
-    role: "Network Analysis Agent",
-    description: "Quiet, baseline-aware observer. Flags deviations without crying wolf.",
-    specialty: "Internal traffic baselining, anomaly detection, endpoint behavior, and data-loss prevention.",
-    status: "online",
-    capabilities: ["Traffic Analysis", "Anomaly Detection", "Endpoint Monitoring", "Data Loss Prevention"],
-  },
-  {
-    id: "wraith",
-    name: "Wraith",
-    type: "ai",
-    role: "Threat Hunter",
-    description: "Adversarial mindset. Looks for what's already inside that nobody else has seen yet.",
-    specialty: "Credential-leak triage, breach exposure checking, vulnerability assessment, and stealth-threat hunting.",
-    status: "online",
-    capabilities: ["Breach Checking", "Vulnerability Assessment", "Threat Hunting", "Credential Monitoring"],
-  },
+// Featured agents shown at the top of the mobile roster. These are the
+// Fortress call_signs we want operators to reach for first; the actual
+// persona / specialty / display name for each comes from the live
+// ai_agents row on Fortress, so mobile and the Fortress webapp roster
+// always show the SAME names. (Previously mobile shipped its own
+// hardcoded "OSINT Hunter" / "Sentinel" copies which led to operators
+// looking for those names on Fortress and not finding them.)
+const FEATURED_CALL_SIGNS = [
+  "AEGIS-CMD",
+  "AUTO-SENT",
+  "ECHO-WATCH",
+  "MATRIX",
+  "WRAITH",
+  "GUARDIAN",
+  "HORATIO",
+  "ARGUS",
 ];
 
+// Icons keyed by Fortress call_sign. Falls back to a generic shield
+// for any agent we haven't picked an icon for yet.
 const agentIcons: Record<string, React.ElementType> = {
-  aegis: Shield,
-  sentinel: Eye,
-  osint: Search,
-  monitor: Radio,
-  wraith: Ghost,
+  "AEGIS-CMD": Shield,
+  "AUTO-SENT": Eye,
+  "ECHO-WATCH": Search,
+  "MATRIX": Radio,
+  "WRAITH": Ghost,
 };
 
 function AgentCard({ agent, onChat }: { agent: Agent; onChat: (agent: Agent) => void }) {
   const status = statusConfig[agent.status || "offline"];
-  const Icon = agentIcons[agent.id] || Shield;
+  const Icon = agentIcons[agent.name?.toUpperCase()] || Shield;
 
   return (
     <motion.div
@@ -210,36 +174,45 @@ export function AgentDirectory() {
   const { data: operators = [], isLoading: operatorsLoading, refetch: refetchOperators } = useOperators();
 
   const isLoading = agentsLoading || operatorsLoading || conversationAgentsLoading;
-  
-  // Merge default AI agents with agents from Fortress and conversation history
-  const allAgentIds = new Set<string>();
-  const mergedAgents: Agent[] = [];
-  
-  // Add default agents first
-  defaultAiAgents.forEach(agent => {
-    if (!allAgentIds.has(agent.id)) {
-      allAgentIds.add(agent.id);
-      mergedAgents.push(agent);
+
+  // Order: featured Fortress agents first (in the order listed in
+  // FEATURED_CALL_SIGNS), then the rest of the active Fortress roster,
+  // then any agents discovered only through prior conversation history.
+  // Names, persona, and specialty come straight from Fortress so the
+  // mobile cards mirror what /command-center shows.
+  const aiAgents: Agent[] = (() => {
+    const seen = new Set<string>();
+    const out: Agent[] = [];
+
+    const fortressByCallSign = new Map<string, Agent>();
+    fortressAgents.filter(a => a.type === "ai").forEach(a => {
+      fortressByCallSign.set(a.name.toUpperCase(), a);
+    });
+
+    for (const cs of FEATURED_CALL_SIGNS) {
+      const a = fortressByCallSign.get(cs.toUpperCase());
+      if (a && !seen.has(a.id)) {
+        seen.add(a.id);
+        out.push(a);
+      }
     }
-  });
-  
-  // Add Fortress agents
-  fortressAgents.filter(a => a.type === "ai").forEach(agent => {
-    if (!allAgentIds.has(agent.id)) {
-      allAgentIds.add(agent.id);
-      mergedAgents.push(agent);
-    }
-  });
-  
-  // Add agents from conversation history
-  conversationAgents.forEach(agent => {
-    if (!allAgentIds.has(agent.id)) {
-      allAgentIds.add(agent.id);
-      mergedAgents.push(agent);
-    }
-  });
-  
-  const aiAgents = mergedAgents;
+
+    fortressAgents.filter(a => a.type === "ai").forEach(a => {
+      if (!seen.has(a.id)) {
+        seen.add(a.id);
+        out.push(a);
+      }
+    });
+
+    conversationAgents.forEach(a => {
+      if (!seen.has(a.id)) {
+        seen.add(a.id);
+        out.push(a);
+      }
+    });
+
+    return out;
+  })();
 
   const handleAgentChat = (agent: Agent) => {
     toast({
