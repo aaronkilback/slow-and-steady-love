@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { fortressClient } from "@/lib/fortress-client";
+import { resolveFortressAgentId } from "@/lib/agent-mappings";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -109,18 +110,6 @@ const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-
 const FORTRESS_CONVERSATION_TABLE = "agent_conversations";
 const FORTRESS_MESSAGE_TABLE = "agent_messages";
 
-function normalizeForMatch(input: string) {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function shouldRetryWithoutAgentId(err: any) {
-  const msg = (err?.message ?? "").toString().toLowerCase();
-  return msg.includes("agent_id") && (msg.includes("column") || msg.includes("schema") || msg.includes("does not exist"));
-}
-
 export function useAgentChat(agentId: string = "aegis") {
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
@@ -130,6 +119,11 @@ export function useAgentChat(agentId: string = "aegis") {
   const [userId, setUserId] = useState<string | null>(null);
   const [operator, setOperator] = useState<OperatorProfile | null>(null);
   const { toast } = useToast();
+
+  // Slug like "sentinel" → real Fortress ai_agents.id. agent_conversations
+  // requires a UUID, and matching what the Fortress webapp uses keeps chat
+  // history shared across both surfaces.
+  const fortressAgentId = useMemo(() => resolveFortressAgentId(agentId), [agentId]);
 
   // Get agent config - use predefined if available, otherwise create dynamic config
   const agentConfig: AgentConfig = AGENT_CONFIGS[agentId] || {
@@ -205,42 +199,27 @@ export function useAgentChat(agentId: string = "aegis") {
   const loadConversations = async () => {
     if (!userId) return;
 
+    // Direct agent_id filter — same key Fortress webapp uses, so the
+    // result set is identical on both sides.
     const { data, error } = await fortressClient
       .from(FORTRESS_CONVERSATION_TABLE)
-      // agent_id may not exist on the Fortress table; keep the select minimal.
-      .select("id, title, updated_at")
+      .select("id, title, updated_at, agent_id")
       .eq("user_id", userId)
+      .eq("agent_id", fortressAgentId)
       .order("updated_at", { ascending: false });
 
     if (!error && data) {
-      // Filter conversations for this specific agent.
-      // Prefer agent_id when present; otherwise use a tolerant title match.
-      const agentNameN = normalizeForMatch(agentConfig.name);
-      const filteredConversations = (data as any[]).filter((conv) => {
-        if (conv.agent_id && conv.agent_id === agentId) return true;
-        if (!conv.title) return agentId === "aegis";
-
-        const titleN = normalizeForMatch(conv.title);
-        // ex: "Chat with SENTINEL-OPS" should match both "sentinel" and "sentinel ops"
-        if (titleN.includes("chat with") && titleN.includes(agentNameN)) return true;
-        if (agentId !== "aegis" && titleN.includes(agentNameN)) return true;
-        return false;
-      });
-
-      setConversations(filteredConversations);
-      // Ensure we always select a valid conversation for the *current* agent.
+      setConversations(data as AgentConversation[]);
       setCurrentConversationId((prev) => {
-        if (filteredConversations.length === 0) return null;
-        if (!prev) return filteredConversations[0].id;
-        const stillExists = filteredConversations.some((c) => c.id === prev);
-        return stillExists ? prev : filteredConversations[0].id;
+        if (data.length === 0) return null;
+        if (!prev) return data[0].id;
+        const stillExists = data.some((c: any) => c.id === prev);
+        return stillExists ? prev : data[0].id;
       });
       return;
     }
 
-    if (error) {
-      console.warn("Failed to load conversations:", error.message);
-    }
+    if (error) console.warn("Failed to load conversations:", error.message);
     setConversations([]);
   };
 
@@ -270,23 +249,11 @@ export function useAgentChat(agentId: string = "aegis") {
 
     const preferredTitle = `Chat with ${agentConfig.name}`;
 
-    // Fortress schema may not include agent_id; try with agent_id first, then fall back.
-    let data: any = null;
-    let error: any = null;
-
-    ({ data, error } = await fortressClient
+    const { data, error } = await fortressClient
       .from(FORTRESS_CONVERSATION_TABLE)
-      .insert({ user_id: userId, agent_id: agentId, title: preferredTitle } as any)
+      .insert({ user_id: userId, agent_id: fortressAgentId, title: preferredTitle })
       .select("id")
-      .single());
-
-    if (error && shouldRetryWithoutAgentId(error)) {
-      ({ data, error } = await fortressClient
-        .from(FORTRESS_CONVERSATION_TABLE)
-        .insert({ user_id: userId, title: preferredTitle } as any)
-        .select("id")
-        .single());
-    }
+      .single();
 
     if (!error && data?.id) {
       setCurrentConversationId(data.id);
@@ -300,23 +267,13 @@ export function useAgentChat(agentId: string = "aegis") {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    // Fortress schema may not include agent_id; try with agent_id first, then fall back.
-    let data: any = null;
-    let error: any = null;
-
-    ({ data, error } = await fortressClient
+    // agent_messages has no agent_id column — the link to an agent is
+    // through the parent conversation, not the message itself.
+    const { data, error } = await fortressClient
       .from(FORTRESS_MESSAGE_TABLE)
-      .insert({ conversation_id: conversationId, role, content, agent_id: agentId } as any)
+      .insert({ conversation_id: conversationId, role, content })
       .select("id, role, content, created_at")
-      .single());
-
-    if (error && shouldRetryWithoutAgentId(error)) {
-      ({ data, error } = await fortressClient
-        .from(FORTRESS_MESSAGE_TABLE)
-        .insert({ conversation_id: conversationId, role, content } as any)
-        .select("id, role, content, created_at")
-        .single());
-    }
+      .single();
 
     if (!error && data) return data;
     throw new Error(error?.message || "Failed to save message");

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { fortressClient } from "@/lib/fortress-client";
+import { AEGIS_FORTRESS_AGENT_ID } from "@/lib/agent-mappings";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -75,11 +76,14 @@ export function useAegisChat() {
     // Use fortressClient — it carries the authed user session. The
     // bare `supabase` client now points at Fortress too but has no
     // session, which means RLS on agent_conversations would reject
-    // every read.
+    // every read. Filtering by agent_id = AEGIS-CMD ensures this list
+    // matches what Fortress's webapp shows for the Aegis agent — chat
+    // history is the same on both platforms.
     const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .select("id, title, updated_at")
       .eq("user_id", userId)
+      .eq("agent_id", AEGIS_FORTRESS_AGENT_ID)
       .order("updated_at", { ascending: false })
       .limit(50);
 
@@ -135,10 +139,12 @@ export function useAegisChat() {
     }
 
     // fortressClient carries the user JWT — required for the
-    // user_id RLS policy on agent_conversations.
+    // user_id RLS policy on agent_conversations. agent_id is NOT NULL
+    // on Fortress: pin to AEGIS-CMD so the conversation shows up under
+    // the same agent in both mobile and the Fortress webapp.
     const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
-      .insert({ user_id: userId })
+      .insert({ user_id: userId, agent_id: AEGIS_FORTRESS_AGENT_ID })
       .select("id")
       .single();
 
