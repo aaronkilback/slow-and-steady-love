@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { fortressClient } from "@/lib/fortress-client";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -23,15 +22,14 @@ interface OperatorProfile {
   avatar_url?: string | null;
 }
 
-// AEGIS chat lives on this project's own Supabase (aegis-chat function +
-// aegis_conversations / aegis_messages tables). The Fortress platform
-// project does NOT have an aegis-chat edge function — pointing the URL
-// there returned 404 and broke every chat call.
+// AEGIS chat lives on Fortress now — the original mobile-only Supabase
+// project (odvvexosqawixehvfzed) was deleted. aegis-chat function was
+// deployed to Fortress; conversations and messages reuse Fortress's
+// existing agent_conversations / agent_messages tables.
 const AEGIS_CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/aegis-chat`;
 
-// Tables on this project's Supabase
-const CONVERSATION_TABLE = "aegis_conversations";
-const MESSAGE_TABLE = "aegis_messages";
+const CONVERSATION_TABLE = "agent_conversations";
+const MESSAGE_TABLE = "agent_messages";
 
 export function useAegisChat() {
   const { user } = useAuth();
@@ -74,7 +72,11 @@ export function useAegisChat() {
   const loadConversations = async () => {
     if (!userId) return;
 
-    const { data, error } = await supabase
+    // Use fortressClient — it carries the authed user session. The
+    // bare `supabase` client now points at Fortress too but has no
+    // session, which means RLS on agent_conversations would reject
+    // every read.
+    const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .select("id, title, updated_at")
       .eq("user_id", userId)
@@ -103,7 +105,7 @@ export function useAegisChat() {
   const loadMessages = async (conversationId: string) => {
     setIsLoading(true);
 
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(MESSAGE_TABLE)
       .select("id, role, content, created_at")
       .eq("conversation_id", conversationId)
@@ -132,9 +134,9 @@ export function useAegisChat() {
       return null;
     }
 
-    // user_id is required (no per-user auth on this Supabase, fortress JWT
-    // provides identity via useAuth — pass it explicitly on insert)
-    const { data, error } = await supabase
+    // fortressClient carries the user JWT — required for the
+    // user_id RLS policy on agent_conversations.
+    const { data, error } = await fortressClient
       .from(CONVERSATION_TABLE)
       .insert({ user_id: userId })
       .select("id")
@@ -156,7 +158,7 @@ export function useAegisChat() {
   };
 
   const saveMessage = async (conversationId: string, role: "user" | "assistant", content: string) => {
-    const { data, error } = await supabase
+    const { data, error } = await fortressClient
       .from(MESSAGE_TABLE)
       .insert({
         conversation_id: conversationId,
@@ -172,7 +174,7 @@ export function useAegisChat() {
 
   const updateConversationTitle = async (conversationId: string, firstMessage: string) => {
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-    await supabase.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
+    await fortressClient.from(CONVERSATION_TABLE).update({ title }).eq("id", conversationId);
     loadConversations();
   };
 
@@ -369,7 +371,7 @@ export function useAegisChat() {
   }, []);
 
   const deleteConversation = useCallback(async (id: string) => {
-    await supabase.from(CONVERSATION_TABLE).delete().eq("id", id);
+    await fortressClient.from(CONVERSATION_TABLE).delete().eq("id", id);
 
     if (currentConversationId === id) {
       setCurrentConversationId(null);
