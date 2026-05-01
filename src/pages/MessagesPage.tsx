@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 
 export default function MessagesPage() {
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)]">
+    <div className="flex flex-col h-full min-h-0">
       <PageHeader 
         title="Messages"
         subtitle="Team messaging & broadcasts"

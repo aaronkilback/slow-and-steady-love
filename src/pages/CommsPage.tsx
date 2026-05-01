@@ -69,7 +69,7 @@ export default function CommsPage() {
   // If no investigation loaded yet, show the case selector
   if (!activeInvestigation) {
     return (
-      <div className="flex flex-col h-[calc(100vh-5rem)]">
+      <div className="flex flex-col h-full min-h-0">
         <PageHeader title="Comms" subtitle="Investigation SMS communications" />
         <div className="flex-1 flex flex-col items-center justify-center px-6">
           <div className="h-16 w-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
@@ -102,7 +102,7 @@ export default function CommsPage() {
       (c) => c.contact_identifier === selectedContact
     );
     return (
-      <div className="flex flex-col h-[calc(100vh-5rem)]">
+      <div className="flex flex-col h-full min-h-0">
         <ThreadView
           contactIdentifier={selectedContact}
           contactName={contact?.contact_name || null}
@@ -122,7 +122,7 @@ export default function CommsPage() {
 
   // Contact list view
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)]">
+    <div className="flex flex-col h-full min-h-0">
       <PageHeader
         title="Comms"
         subtitle={`Case: ${activeInvestigation}`}

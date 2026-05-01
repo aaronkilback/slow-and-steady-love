@@ -690,7 +690,7 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
         )}
 
         {/* Input */}
-        <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
+        <div className="border-t border-border bg-card/50 p-4">
           <div className="flex items-center gap-2">
             <SOSButton onTrigger={handleSOS} disabled={isSending} />
             <AttachmentPicker

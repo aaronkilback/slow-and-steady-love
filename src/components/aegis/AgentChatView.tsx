@@ -182,7 +182,7 @@ You have full access to platform intelligence. Reference signals, team status, a
   const welcomeContent = getWelcomeContent(agentConfig);
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Chat header */}
       <div className="flex items-center justify-between border-b border-border bg-card/50 px-4 py-3">
         <div className="flex items-center gap-3">
@@ -323,7 +323,7 @@ You have full access to platform intelligence. Reference signals, team status, a
       </ScrollArea>
 
       {/* Input area */}
-      <div className="border-t border-border bg-card/50 p-4 safe-area-bottom">
+      <div className="border-t border-border bg-card/50 p-4">
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
