@@ -84,7 +84,48 @@ export function ConversationView({ conversationId, onBack }: ConversationViewPro
   const [mentionStart, setMentionStart] = useState<number>(-1);
   // Multiple agents can be addressed in a single message. The send
   // handler fires respond-as-agent once per agent in this list.
-  const [mentionedAgents, setMentionedAgents] = useState<MentionableAgent[]>([]);
+  // Persisted to localStorage per conversation so that "in dialogue
+  // with X" survives navigating away from the conversation and back.
+  // Without this, useState resets to [] on remount and operators have
+  // to re-@-mention the agent every time they switch tabs.
+  const stickyKey = `mentionedAgents:${conversationId}`;
+  const [mentionedAgents, setMentionedAgents] = useState<MentionableAgent[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(stickyKey);
+      if (raw) {
+        const stored = JSON.parse(raw);
+        if (Array.isArray(stored)) return stored;
+      }
+    } catch { /* corrupt entry — ignore */ }
+    return [];
+  });
+  // Re-hydrate when the conversation switches (route changes) — the
+  // route key normally remounts the component so lazy init already
+  // catches it, but this guards against in-place conversation swaps.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(stickyKey);
+      const stored = raw ? JSON.parse(raw) : [];
+      setMentionedAgents(Array.isArray(stored) ? stored : []);
+    } catch {
+      setMentionedAgents([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+  // Persist on every change. Empty list removes the key so we don't
+  // leave dangling entries in localStorage forever.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (mentionedAgents.length > 0) {
+        window.localStorage.setItem(stickyKey, JSON.stringify(mentionedAgents));
+      } else {
+        window.localStorage.removeItem(stickyKey);
+      }
+    } catch { /* quota / disabled — non-fatal */ }
+  }, [mentionedAgents, stickyKey]);
   const [pendingAgentResponses, setPendingAgentResponses] = useState(0);
   const mentionRef = useRef<AgentMentionTypeaheadHandle>(null);
   const { data: fortressAgents = [] } = useAgents();
