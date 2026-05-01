@@ -267,6 +267,10 @@ export function useAegisChat() {
             : userId
               ? { id: userId, name: null }
               : null,
+          // Pin the Fortress agent UUID so the backend can recall + write
+          // memories and beliefs against AEGIS-CMD specifically.
+          agentFortressId: AEGIS_FORTRESS_AGENT_ID,
+          agentConfig: { name: "AEGIS-CMD", codename: "AEGIS-CMD" },
         }),
       });
 

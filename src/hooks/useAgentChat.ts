@@ -344,6 +344,10 @@ export function useAgentChat(agentId: string = "aegis") {
           conversationId: convId,
           platformContext: platformContext || null,
           agentId: agentId,
+          // Resolved Fortress UUID — backend uses this to recall + write
+          // memory and beliefs against the same agent the Fortress webapp
+          // sees, so learning accumulates across surfaces.
+          agentFortressId: fortressAgentId,
           agentConfig: agentConfig,
           operator: operator ? { id: operator.id, name: operator.name ?? null } : userId ? { id: userId, name: null } : null,
         }),
