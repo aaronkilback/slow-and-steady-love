@@ -4,6 +4,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthProvider";
 
+// Personal-travel table names (operator-personal trips). Sandboxed
+// under personal_* names because Fortress already has `travel_*` tables
+// with a different schema and domain (analyst-tracking client travel).
+const TRIPS = "personal_trips";
+const FLIGHTS = "personal_trip_flights";
+const ALERTS = "personal_trip_alerts";
+
 export interface TravelItinerary {
   id: string;
   user_id: string;
@@ -60,13 +67,12 @@ export function useTravelItineraries() {
     queryKey: ["travel-itineraries", userId],
     enabled: !!userId,
     queryFn: async () => {
-      // Travel rows live on this project's Supabase but auth lives on
-      // Fortress, so we cannot rely on auth.uid() in RLS — scope by the
-      // resolved Fortress user_id explicitly. RLS is "allow all" on
-      // these tables; this filter is what actually keeps users from
-      // seeing each other's itineraries.
+      // RLS on personal_trips/personal_trip_flights/personal_trip_alerts
+      // already scopes rows to auth.uid() = user_id. This explicit
+      // filter is belt-and-suspenders so the planner uses the user_id
+      // index immediately.
       const { data, error } = await supabase
-        .from("travel_itineraries")
+        .from(TRIPS)
         .select("*")
         .eq("user_id", userId!)
         .order("departure_date", { ascending: true });
@@ -87,7 +93,7 @@ export function useTravelItineraries() {
       if (!userId) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
-        .from("travel_itineraries")
+        .from(TRIPS)
         .insert({
           user_id: userId,
           ...params,
@@ -108,7 +114,7 @@ export function useTravelItineraries() {
   const updateItinerary = useMutation({
     mutationFn: async (params: { id: string; updates: Partial<TravelItinerary> }) => {
       const { data, error } = await supabase
-        .from("travel_itineraries")
+        .from(TRIPS)
         .update(params.updates)
         .eq("id", params.id)
         .select()
@@ -127,7 +133,7 @@ export function useTravelItineraries() {
   const deleteItinerary = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
-        .from("travel_itineraries")
+        .from(TRIPS)
         .delete()
         .eq("id", id);
 
@@ -162,7 +168,7 @@ export function useTravelFlights(itineraryId?: string) {
     enabled: !!userId,
     queryFn: async () => {
       let query = supabase
-        .from("travel_flights")
+        .from(FLIGHTS)
         .select("*")
         .eq("user_id", userId!)
         .order("departure_time", { ascending: true });
@@ -191,7 +197,7 @@ export function useTravelFlights(itineraryId?: string) {
       if (!userId) throw new Error("Not authenticated");
 
       const { data, error } = await supabase
-        .from("travel_flights")
+        .from(FLIGHTS)
         .insert({
           user_id: userId,
           ...params,
@@ -212,7 +218,7 @@ export function useTravelFlights(itineraryId?: string) {
   const updateFlight = useMutation({
     mutationFn: async (params: { id: string; updates: Partial<TravelFlight> }) => {
       const { data, error } = await supabase
-        .from("travel_flights")
+        .from(FLIGHTS)
         .update(params.updates)
         .eq("id", params.id)
         .select()
@@ -230,7 +236,7 @@ export function useTravelFlights(itineraryId?: string) {
   const deleteFlight = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
-        .from("travel_flights")
+        .from(FLIGHTS)
         .delete()
         .eq("id", id);
 
@@ -276,7 +282,7 @@ export function useTravelAlerts() {
     enabled: !!userId,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("travel_alerts")
+        .from(ALERTS)
         .select("*")
         .eq("user_id", userId!)
         .order("created_at", { ascending: false });
@@ -289,7 +295,7 @@ export function useTravelAlerts() {
   const markAsRead = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
-        .from("travel_alerts")
+        .from(ALERTS)
         .update({ is_read: true })
         .eq("id", id);
 

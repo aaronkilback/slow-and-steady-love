@@ -165,7 +165,7 @@ export function UploadItineraryDialog({ open, onOpenChange }: UploadItineraryDia
                 ? `${sf.flight_number} Cancelled`
                 : `${sf.flight_number} Delayed${parsed.delay_minutes ? ` ${parsed.delay_minutes}min` : ""}`;
 
-              await supabase.from("travel_alerts").insert({
+              await supabase.from(ALERTS).insert({
                 user_id: user.id,
                 itinerary_id: itineraryId || null,
                 title,

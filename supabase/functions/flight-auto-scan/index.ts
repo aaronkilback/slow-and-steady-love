@@ -27,7 +27,7 @@ serve(async (req) => {
     const horizon = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
     const { data: flights, error: fetchError } = await supabase
-      .from("travel_flights")
+      .from(FLIGHTS)
       .select("*")
       .in("status", ["scheduled", "delayed", "departed"])
       .gte("departure_time", now.toISOString())
@@ -131,7 +131,7 @@ IMPORTANT: At the end of your response, include a JSON block in this exact forma
         if (parsed.delay_reason) updates.delay_reason = parsed.delay_reason;
 
         await supabase
-          .from("travel_flights")
+          .from(FLIGHTS)
           .update(updates)
           .eq("id", flight.id);
 
@@ -149,7 +149,7 @@ IMPORTANT: At the end of your response, include a JSON block in this exact forma
             ? `${parsed.delay_reason}. Route: ${flight.departure_airport} → ${flight.arrival_airport}`
             : `Flight ${flight.flight_number} (${flight.departure_airport} → ${flight.arrival_airport}) is now ${parsed.status}`;
 
-          await supabase.from("travel_alerts").insert({
+          await supabase.from(ALERTS).insert({
             user_id: flight.user_id,
             itinerary_id: flight.itinerary_id,
             title,
@@ -162,7 +162,7 @@ IMPORTANT: At the end of your response, include a JSON block in this exact forma
           console.log(`Alert created: ${title}`);
         } else if (delayChanged && parsed.delay_minutes > 0 && parsed.delay_minutes > (flight.delay_minutes || 0)) {
           // Delay increased
-          await supabase.from("travel_alerts").insert({
+          await supabase.from(ALERTS).insert({
             user_id: flight.user_id,
             itinerary_id: flight.itinerary_id,
             title: `${flight.flight_number} delay increased to ${parsed.delay_minutes}min`,
